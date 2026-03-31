@@ -1,0 +1,27 @@
+project_name: District 16
+fishery_name: Hoh winter steelhead 2023-24
+est_date_start: '2023-12-01'
+est_date_end: '2024-03-31'
+est_catch_groups:
+  species: Steelhead
+  life_stage: Adult
+  fin_mark: UM
+  fate: Released
+study_design: Standard
+boat_type_collapse: 'Yes'
+fish_location_determines_type: 'No'
+angler_type_kayak_pontoon: bank
+person_count_type: group
+period_pe: week
+period_bss: day
+days_wkend:
+- Saturday
+- Sunday
+day_length_expansion: night closure
+min_fishing_time: 0.5
+bss_model_file_name: BSS_creel_model_02_2024-04-03.stan
+model_used: Both models
+data_grade: provisional
+export: local
+export_tables: both
+enable_cache: no
