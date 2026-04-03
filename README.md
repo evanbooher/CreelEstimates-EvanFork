@@ -1,4 +1,6 @@
-# Freshwater Creel Estimates
+# Freshwater Creel Estimates — Hoh River Study
+
+> **Note:** This is a forked version of [CreelEstimates](https://github.com/wdfw-fp/CreelEstimates). Its purpose is to document the analysis used to produce catch and effort estimates for use in WDFW's evaluation of regulations prohibiting boat fishing on steelhead catch rate in the Hoh River during the 2023–24 fishing season.
 
 This repository supports estimation of freshwater fishery catches and angler effort using roving-roving creel designs.
 
