@@ -9,7 +9,6 @@ prep_dwg_effort_index <- function(
     angler_type_kayak_pontoon = NA,     # string passed from params that controls whether a boat designated as a kayak, pontoon, or kick during an effort count or angler group interview should be designated as a boat or bank angler.
     ...){
   
-  params <- params
 #create intermediate object index_angler_groups that converts count_type objects to angler_final
 if(str_detect(study_design, "tandard" )){
 
@@ -58,15 +57,20 @@ if(str_detect(study_design, "tandard" )){
     ) 
 } 
 # create final object output of interest index_angler_final that summarizes index count data by section_num, event_date, count_sequence, & angler_final  
-  index_angler_final<-  
-    index_angler_groups |>  
-    dplyr::group_by(section_num, event_date, count_sequence, angler_final) |> #
-    dplyr::summarise(count_index = sum(count_quantity), .groups = "drop") |> 
-    dplyr::arrange(section_num, event_date, count_sequence) |> 
+  index_angler_final <-
+    index_angler_groups |>
+    dplyr::group_by(section_num, event_date, count_sequence, angler_final) |>
+    dplyr::summarise(count_index = sum(count_quantity), .groups = "drop") |>
+    dplyr::arrange(section_num, event_date, count_sequence) |>
     mutate(
-      fishery_name = params$fishery_name # add back fishery_name
-      , angler_final_int = as.integer(factor(angler_final)) 
-    ) |> 
+      fishery_name = params$fishery_name,
+      angler_final_int = as.integer(factor(angler_final, levels = c("total", "boat"))),
+      count_type = dplyr::case_match(
+        angler_final,
+        "total" ~ "Vehicle Only",
+        "boat"  ~ "Trailers Only"
+      )
+    ) |>
     relocate(fishery_name)
   
   return(list(index_angler_groups = index_angler_groups, index_angler_final = index_angler_final))  

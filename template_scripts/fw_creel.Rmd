@@ -19,7 +19,7 @@ params:
   days_wkend: !r c('Saturday', 'Sunday')
   day_length_expansion: "night closure"
   min_fishing_time: 0.5
-  bss_model_file_name: "BSS_creel_model_02_2024-04-03.stan"
+  bss_model_file_name: "BSS_creel_model_02_2021-01-22_ppc.stan"
   model_used: "Both models"
   data_grade: "provisional"
   export: "local"
@@ -568,19 +568,9 @@ saveRDS(dwg_summ, file.path(outputs_folders$inputs, "dwg_summ.rds"))
 ```{r plot_index_effort_counts, cache=params$enable_cache, dependson="prep_dwg_summ_shared_summary_objects", fig.cap= "Index effort counts for each count sequence on surveyed days within the monitoring period. Index counts represent the sum of counts completed at each sampling site during a drive around effort count."}
 # plot of index effort counts faceted by section and count_type per count sequence and day 
 
-# rename to items actually counted 
-summarised_index_counts <- dwg_summ$effort_index |>
-  mutate(
-    angler_final = case_when(
-      angler_final == "boat" ~ "trailers",
-      angler_final == "total" ~ "vehicles",
-      TRUE ~ angler_final  # keeps any other values unchanged
-    )
-  )
-
 plot_inputs_pe_index_effort_counts(
   params = params,
-  effort_index = summarised_index_counts,
+  effort_index = dwg_summ$effort_index,
   outputs_folders = outputs_folders)
 ```
 
@@ -858,6 +848,7 @@ for(ecg in names(inputs_bss)) {
   # fit the model to generate estimates 
   ecg_fit <-
     fit_bss(
+      model_file_name = params$bss_model_file_name,
       bss_inputs_list = inputs_bss[[ecg]],
       n_chain = 2,  
       n_cores = 2,
@@ -1419,7 +1410,7 @@ if (params$export %in% c("database", "local") && !params$model_used %in% c("PE o
   }
   
   #Combine PE and BSS and perform other transformation steps
-  creel_estimates <- transform_estimates(params = params, dwg, transformed_pe_data, transformed_bss_data)  
+  creel_estimates <- creelutils::transform_estimates(params, dwg, transformed_pe_data, transformed_bss_data)  
 
 }
 
@@ -1436,7 +1427,14 @@ if (params$export == "database") {
   #calls prep_export()
   #Defines functions for writing to database tables
   #Performs pre- and post- upload QAQC checks
-  creelutils::export_estimates(params, analysis_lut, creel_estimates)
+  # creelutils::export_estimates(params, analysis_lut, creel_estimates)
+  
+  con <- creelutils::connect_creel_db()
+  
+  analysis_lut <- analysis_lut |> 
+    dplyr::select(-fishery_name, -identifier, -analysis_folder, -created_datetime)
+  
+  creelutils::export_estimates(conn = con , params, analysis_lut, creel_estimates)
   
 } else if (params$export == "local") {
   # Save all export tables to outputs folder
