@@ -109,25 +109,29 @@ Run in order:
    fishery-series. Re-run `03_plot_b_series.R` after this to get Figure 6
    (options overlaid on the series).
 
-## Public-data path -- check this before assuming VPN is required
+## Public-data path -- confirmed working, VPN not required
 
-`creelutils::fetch_data()` reportedly already supports a public/`data.wa.gov`
-path (the internal DB path is `data_source = "internal"`; a comment on the
-`chore/multi-fishery-trip-summary` branch references
-`creelutils::fetch_fishery_names()` historically pulling from "the public
-Socrata endpoint"). **Before running step 2 for real, check locally:**
+**Checked locally (VPN off):** `creelutils::fetch_data(fishery_name = "Skagit
+fall salmon 2024", data_source = "external")` is the public/`data.wa.gov`
+path, and it returns BSS-grade data. `dwg$effort` (5247x25) and `dwg$catch`
+(964x11) pass the full column checklist in `01_fit_bss_bias.R`'s header
+(including `species`/`life_stage`/`fin_mark`/`fate` on `catch`). `dwg$interview`
+(1811x39) has every required raw column except `fishing_time_total` /
+`person_count_final`, which are computed downstream from columns that ARE
+present (`fishing_start_time`/`fishing_end_time`, `angler_count`/
+`total_group_count`) -- not a gap.
 
-```r
-?creelutils::fetch_data
-formals(creelutils::fetch_data)$data_source
-```
+`dwg$ll`'s `centroid_lat`/`centroid_lon` and `dwg$fishery_manager`'s
+`p_census_bank`/`p_census_boat` were not independently re-verified against
+the public path, but per direct confirmation the latter is moot for `b`
+either way: `p_census_bank`/`boat` feed the `p_TI`/census-tie-in spatial-
+coverage correction (a defunct-in-practice, DIFFERENT parameter -- see "What
+'the bias term' is" above), not `b`'s identification.
 
-Try one fishery with whatever the public value turns out to be, WITHOUT VPN
-connected, and check whether `dwg$effort`/`dwg$interview` come back with
-actual count/interview-level rows (not just published estimates) -- see the
-column checklist in `01_fit_bss_bias.R`'s header. If it works, the VPN
-dependency for this entire analysis may disappear; if not, set
-`DATA_SOURCE <- "internal"` in `01_fit_bss_bias.R` (the default) and use VPN.
+So `DATA_SOURCE <- "external"` in `01_fit_bss_bias.R` is a viable VPN-free
+option for the whole pipeline. The default remains `DATA_SOURCE <-
+"internal"` since VPN/DB access is available locally anyway -- switch to
+`"external"` only if running somewhere without VPN.
 
 ## Same-day feasibility -- read this before starting a full historical run
 
@@ -141,7 +145,9 @@ finish before the meeting. Triage in this order:
   prior project folders for any saved `stanfit` `.rds` from a past BSS run of
   these fisheries. If any turn up, `get_bss_bias()` extracts `b` from them in
   seconds and steps 3-5 complete immediately for those years.
-- **T1 (30 min):** the public-data-path check above.
+- **T1 (30 min):** the public-data-path check above -- DONE, confirmed
+  working (`data_source = "external"`); not on this run's critical path
+  since VPN is available, but ruled out as a blocker either way.
 - **T2 (30-60 min):** run ONE fishery-year (suggest `"Skagit fall salmon
   2024"`) end-to-end at `FIT_CONFIG_NAME <- "smoke"` in `01_fit_bss_bias.R`
   to prove the pipeline, then re-run the SAME fishery at `"quick"` and time

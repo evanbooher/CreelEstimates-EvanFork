@@ -26,36 +26,25 @@
 # ------------------------------------------------------------------------------
 # BEFORE RUNNING -- two things to check first, in order:
 #
-# [0.A] Does creelutils have a VPN-free public-data path that's good enough
-#       for BSS? CreelEstimates/creelutils are reportedly built to point at
-#       data.wa.gov as an option (per repo conventions -- e.g. the comment in
-#       analysis/pst/02_ingest/multi_fishery_creel_summary.R on the
-#       chore/multi-fishery-trip-summary branch notes creelutils::
-#       fetch_fishery_names() historically pulled from "the public Socrata
-#       endpoint"). Check locally, once, before assuming VPN is required for
-#       the whole run:
+# [0.A] CONFIRMED (checked locally, VPN off): creelutils::fetch_data(...,
+#       data_source = "external") is the public/data.wa.gov path, and it DOES
+#       carry BSS-grade data -- dwg_test$effort (5247x25) and dwg_test$catch
+#       (964x11) passed the full column checklist below; dwg_test$interview
+#       (1811x39) has every required raw column except fishing_time_total /
+#       person_count_final, which are computed downstream from columns that
+#       ARE present (fishing_start_time/fishing_end_time, angler_count/
+#       total_group_count) -- not a gap. dwg$ll's centroid_lat/centroid_lon
+#       and dwg$fishery_manager's p_census_bank/p_census_boat were not
+#       independently re-verified in this check, but the latter is moot for
+#       `b`: p_census_bank/boat feed the p_TI/census-tie-in spatial-coverage
+#       correction, a defunct-in-practice DIFFERENT parameter from `b` (see
+#       README.md's "What 'the bias term' is") -- irrelevant to this
+#       analysis's identification of `b` either way.
 #
-#         ?creelutils::fetch_data
-#         formals(creelutils::fetch_data)$data_source
-#         creelutils::fetch_data    # print the source; look for a data.wa.gov/Socrata branch
-#
-#       Then try ONE fishery with the public value (whatever it turns out to
-#       be -- "public", "socrata", "external", etc.):
-#
-#         dwg_test <- creelutils::fetch_data(fishery_name = "Skagit fall salmon 2024",
-#                                             data_source = <public value>)
-#         names(dwg_test); purrr::map(dwg_test, dim)
-#         names(dwg_test$effort); names(dwg_test$interview)
-#
-#       Pass/fail test: BSS input prep needs INTERVIEW-LEVEL and COUNT-LEVEL
-#       rows with (at minimum) dwg$effort$[tie_in_indicator, no_count_reason,
-#       count_type, count_quantity, count_sequence, section_num, event_date,
-#       location_type, p_census_bank, p_census_boat] and dwg$interview$
-#       [interview_id, vehicle_count, trailer_count, person_count_final (or its
-#       inputs), event_date, section_num, fishing_time_total, species,
-#       life_stage, fin_mark, fate] and dwg$ll$[centroid_lat, centroid_lon]. If
-#       the public source returns only published estimates/metadata, fall back
-#       to DATA_SOURCE <- "internal" below (VPN required).
+#       So DATA_SOURCE <- "external" below is a viable VPN-free option. This
+#       run used DATA_SOURCE <- "internal" anyway (VPN/DB already available
+#       locally) -- purely a convenience choice, not a fallback from a failed
+#       "external" check.
 #
 # [0.B] Time ONE fishery-year end to end at the "smoke" config (see
 #       FIT_CONFIGS below) before committing to a full run. If it takes materially
