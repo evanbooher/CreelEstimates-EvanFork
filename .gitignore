@@ -52,3 +52,8 @@ config.yml
 # Dev container configuration
 .devcontainer/
 .devcontainer
+
+# BSS effort-bias analysis: full stanfit objects are large; the CSVs, gt
+# HTML tables, figures, and raw b draws are the actual deliverable and stay
+# tracked. See analysis/bss_bias/README.md.
+/analysis/bss_bias/outputs/fits/
