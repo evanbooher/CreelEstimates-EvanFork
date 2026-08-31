@@ -224,11 +224,24 @@ combined <- bind_rows(target, adjacent) |>
 
 write_csv(combined, file.path(OUT_DIR, "fishery_discovery_target.csv"))
 
-cli::cli_h1("Result: basin x year fishery list")
+cli::cli_h1("Result: basin x year FISHERY-YEAR count")
+cli::cli_alert_info(
+  "This dataset is one row per (fishery, location/section), not one row per \\
+   fishery-year -- distinct()'d on fishery_name_raw below so this count \\
+   matches what 01_fit_bss_bias.R will actually iterate over."
+)
 combined |>
   filter(basin_match == "target") |>
+  distinct(basin, year_start, fishery_name_raw) |>
   count(basin, year_start) |>
   print(n = 100)
+
+cli::cli_h2("Distinct target fishery-years (review THIS list by hand)")
+combined |>
+  filter(basin_match == "target") |>
+  distinct(basin, year_start, fishery_name_raw) |>
+  arrange(basin, year_start, fishery_name_raw) |>
+  print(n = 300)
 
 cli::cli_alert_success(
   "Wrote {nrow(combined)} target/adjacent rows to \\
