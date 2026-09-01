@@ -1,0 +1,168 @@
+---
+title: "BSS effort-bias term (`b`): predictive approach"
+subtitle: "DRAFT — proposed next steps, not reviewed"
+date: last-modified
+execute:
+  warning: false
+  message: false
+  echo: false
+format:
+  html:
+    page-layout: full
+    code-tools: true
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    title-block-banner: "#8a6d1f"
+---
+
+```{r setup}
+library(tidyverse)
+library(here)
+library(gt)
+
+OUT_DIR <- here::here("analysis", "bss_bias", "outputs")
+FIG_DIR <- file.path(OUT_DIR, "figures")
+
+# Same presentation-layer pattern as the main report: reads outputs/ and
+# recomputes nothing, so it cannot disagree with the pipeline and re-renders
+# in seconds. See ../bss_bias_report.qmd.
+
+read_out <- function(name) {
+  p <- file.path(OUT_DIR, name)
+  if (file.exists(p)) readr::read_csv(p, show_col_types = FALSE) else NULL
+}
+
+fig_path <- function(name) {
+  p <- file.path(FIG_DIR, paste0(name, ".png"))
+  if (file.exists(p)) p else NULL
+}
+
+missing_note <- function(script) {
+  cat(paste0(
+    "::: {.callout-note}\n## Not yet generated\n",
+    "Run `", script, "` and re-render. This section fills itself in.\n:::\n"
+  ))
+}
+
+T2 <- read_out("bss_b_T2_variability.csv")
+toy_recovery <- read_out("bss_b_toy_recovery.csv")
+```
+
+::: {.callout-important}
+## Status: draft
+This is **not** part of the reviewed working-session document. It holds the
+material that goes beyond the first-order variability question — the empirical
+predictive distributions and a worked demonstration that the method recovers a
+known answer.
+
+It is here so the group has something concrete to react to when deciding
+whether to take the predictive approach further. The conceptual model it
+implements is in §4 of the [main report](../bss_bias_report.html).
+:::
+
+## Why this exists
+
+The main report answers *how variable is `b`*. This one takes the next step:
+**if we cannot measure `b` in a given fishery-year, what should we use, and how
+uncertain is it?**
+
+Nothing here is settled. The point is to make the proposal concrete enough to
+argue with.
+
+## What the history implies for an unmeasured year
+
+```{r}
+#| results: asis
+p <- fig_path("fig8_predictive_distribution")
+if (is.null(p)) missing_note("analysis/bss_bias/06_variability_analysis.R") else cat(paste0("![](", p, ")\n"))
+p2 <- fig_path("fig8b_predictive_distribution_trailer")
+if (!is.null(p2)) cat(paste0("\n![](", p2, ")\n"))
+```
+
+The shaded band is the **95% prediction interval for a year we did not
+observe**, built from that fishery's own history. It is the direct answer to
+"what do we use when there is no census data, and how uncertain is it?"
+
+- **Tight band** → historical `b` transfers; use the pooled estimate with its PI.
+- **Wide band** → it does not transfer, and a single historical value would be
+  false precision.
+
+```{r}
+if (!is.null(T2)) {
+  T2 |>
+    filter(!is.na(pi_lb)) |>
+    transmute(
+      Basin = basin, Fishery = fishery_type, Likelihood = bias_type,
+      `N yrs` = n_years,
+      b = round(pooled_b, 3),
+      `PI lo` = round(pi_lb, 3), `PI hi` = round(pi_ub, 3),
+      `PI / CI width` = round(pi_width_ratio, 2),
+      tau = round(tau, 3)
+    ) |>
+    gt(groupname_col = "Likelihood") |>
+    tab_header(
+      title = "Predictive distribution for an unobserved year",
+      subtitle = "The interval a new year's b is expected to fall in, per fishery series."
+    ) |>
+    tab_footnote(
+      footnote = "PI / CI width: how much wider the predictive interval is than the confidence interval on the series mean. It is the price of predicting a new year rather than describing past ones.",
+      locations = cells_column_labels(columns = `PI / CI width`)
+    ) |>
+    opt_row_striping()
+}
+```
+
+## Does the approach actually work?
+
+Before trusting this on real numbers, here it is on a **simulated world where
+the truth is known** — three rivers, seven years, a known pink effect and known
+between-river and between-year variances.
+
+```{r}
+#| results: asis
+for (nm in c("figA_toy_simulated_world", "figC_toy_variance_components", "figB_toy_prediction_check")) {
+  p <- fig_path(nm)
+  if (!is.null(p)) cat(paste0("![](", p, ")\n\n"))
+}
+if (is.null(fig_path("figA_toy_simulated_world"))) missing_note("analysis/bss_bias/05_predictive_toy.R")
+```
+
+```{r}
+if (!is.null(toy_recovery)) {
+  toy_recovery |>
+    gt() |>
+    tab_header(title = "Parameter recovery on simulated data",
+               subtitle = "Known truth vs. what the method recovered") |>
+    opt_row_striping()
+}
+```
+
+The held-out check is the use case in miniature: drop the most recent year,
+refit on the rest, and ask whether the predictive distribution covers the value
+that was hidden. **If it does not work here, where the truth is known and the
+model is correctly specified, it will not work on the real data.**
+
+## Open questions for the group
+
+1. **Which rung?** The ladder in §4 of the main report runs from "use last
+   year's `b`" to a hierarchical re-specification inside the Stan model.
+   Rungs 1–3 are a two-stage approximation; rung 4 is a model rewrite.
+2. **Does the pink covariate earn its place?** It is a plausible mechanism with
+   a thin design behind it — few odd years against few even ones, and only the
+   fall fisheries can carry the test at all.
+3. **Pool across rivers, or keep series independent?** Pooling lets a
+   data-poor fishery borrow strength, at the cost of assuming the rivers are
+   exchangeable in a way nobody has checked.
+4. **What is good enough?** A prediction interval honestly reflecting the
+   uncertainty may be wide. The question is whether a wide honest interval is
+   more useful for management than a narrow assumed one.
+
+## Reproducing this
+
+```bash
+Rscript analysis/bss_bias/05_predictive_toy.R
+Rscript analysis/bss_bias/06_variability_analysis.R
+quarto render analysis/bss_bias/report/draft/bss_bias_next_steps.qmd
+```

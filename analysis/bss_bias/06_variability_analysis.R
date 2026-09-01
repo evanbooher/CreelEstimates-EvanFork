@@ -46,6 +46,14 @@
 #      n_informed alongside n_years, and T2 carries an informed-only
 #      sensitivity column. Read those before quoting a b[2] number.
 #
+# [V4] The PINK-YEAR analysis (T3, Figure 7) uses only the FALL-TIMED
+#      fisheries. Pinks return in the fall of odd years, so a fishery has to
+#      be fishing while they are in the river for a pink year to move its
+#      effort. Skagit spring Chinook (Apr-Jul) and summer sockeye (Jun-Jul)
+#      have no in-season overlap and are excluded -- including them would not
+#      test the hypothesis, only dilute it. T1 and T2 still cover every
+#      fishery. See PINK_RELEVANT_TARGETS below.
+#
 # Outputs (analysis/bss_bias/outputs/ and outputs/figures/):
 #   bss_b_T1_inventory.csv / .html        -- every bias term: river x fishery x year x likelihood type
 #   bss_b_T2_variability.csv / .html      -- per-series tau^2, I^2, Q, and the PREDICTION interval
@@ -134,6 +142,41 @@ if (nrow(dat) == 0) cli::cli_abort("No usable bias estimates after filtering -- 
 # Unconverged fits are excluded from the MODELS (they are not estimates of
 # anything) but stay visible in the T1 inventory so nothing silently vanishes.
 model_dat <- dat |> filter(is.na(informed_flag) | informed_flag != "unconverged")
+
+# ------------------------------------------------------------------------------
+# [V4] PINK-YEAR ANALYSIS IS RESTRICTED TO FALL-TIMED FISHERIES.
+#
+# Puget Sound pinks return in the fall of odd years. A fishery has to be
+# fishing while they are in the river for a pink year to change its effort,
+# and therefore its vehicle:angler relationship. That holds for the fall
+# fisheries and not for the others:
+#
+#   Skagit fall salmon         Aug-Nov   overlaps the pink return    IN
+#   Snohomish fall salmon      Aug-Nov   overlaps                    IN
+#   Stillaguamish salmon+gf    Sep-Nov   overlaps                    IN
+#   Skagit spring Chinook      Apr-Jul   no overlap                  OUT
+#   Skagit summer sockeye      Jun-Jul   no overlap                  OUT
+#
+# Including the spring and summer fisheries would not test the hypothesis --
+# there is no in-season angler basis for pinks to affect them -- it would only
+# add years whose odd/even split is noise, diluting the contrast and making a
+# real effect harder to see.
+#
+# Selected via target species, which is the same key the catch groups use:
+# the Coho-target fisheries ARE the fall-timed ones.
+# ------------------------------------------------------------------------------
+
+PINK_RELEVANT_TARGETS <- "Coho"
+
+pink_dat <- model_dat |>
+  mutate(target_species = target_species_from_est_cg(est_cg)) |>
+  filter(target_species %in% PINK_RELEVANT_TARGETS)
+
+cli::cli_alert_info(
+  "Pink-year analysis restricted to fall-timed ({.val {PINK_RELEVANT_TARGETS}}-target) fisheries: \\
+   {n_distinct(pink_dat$fishery_type)} series, {nrow(pink_dat)} estimate(s) \\
+   (of {nrow(model_dat)} overall) -- see [V4]."
+)
 
 cli::cli_alert_info(
   "{nrow(dat)} bias estimate(s) across {n_distinct(dat$fishery_type)} fishery series, \\
@@ -321,7 +364,7 @@ fit_decomposition <- function(df) {
   )
 }
 
-T3 <- model_dat |>
+T3 <- pink_dat |>
   group_by(bias_type) |>
   group_modify(~ fit_decomposition(.x) %||% tibble()) |>
   ungroup()
@@ -367,7 +410,7 @@ if (nrow(T3) == 0) {
 # ------------------------------------------------------------------------------
 
 make_pink_fig <- function(bt, param_symbol) {
-  d <- model_dat |> filter(bias_type == bt)
+  d <- pink_dat |> filter(bias_type == bt)
   if (nrow(d) == 0) return(NULL)
 
   parity_means <- d |> group_by(fishery_type, parity) |>

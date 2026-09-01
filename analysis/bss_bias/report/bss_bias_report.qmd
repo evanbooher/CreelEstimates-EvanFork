@@ -71,7 +71,6 @@ T2  <- read_out("bss_b_T2_variability.csv")
 T3  <- read_out("bss_b_T3_pink_effect.csv")
 comp <- read_out("bss_b_comparability.csv")
 ledger <- read_out("bss_b_run_ledger.csv")
-toy_recovery <- read_out("bss_b_toy_recovery.csv")
 ```
 
 ## The question
@@ -93,7 +92,9 @@ Snohomish and Stillaguamish fall salmon fisheries. So:
 > cannot measure. If it is highly variable, they do not, and we need a
 > defensible way to construct a predictive distribution instead.
 
-That second case is what §5 and §6 set up.
+That second case is what §4 sets up. The worked predictive distributions and a
+known-truth demonstration are in the companion draft,
+[proposed next steps](draft/bss_bias_next_steps.html), pending discussion.
 
 ### What `b` actually is
 
@@ -242,7 +243,7 @@ if (!is.null(T1)) {
 ## 2. Interannual variability
 
 `b[1]` (vehicle) and `b[2]` (trailer) across years, by basin. Marker shape
-encodes the comparability tier; see §7 for what the tiers mean.
+encodes the comparability tier; see §5 for what the tiers mean.
 
 ::: {.panel-tabset}
 
@@ -318,10 +319,18 @@ is much larger than `tau`², the apparent stability came from prior-dominated
 years sitting near `b = 1`.
 :::
 
-## 3. Pink-year effect
+## 3. Pink-year effect?
 
 Puget Sound pink salmon return in **odd** years, bringing large effort influxes
 that plausibly shift the vehicle:angler relationship.
+
+**This section uses only the fall-timed fisheries.** A fishery has to be
+fishing while the pinks are in the river for a pink year to move its effort, so
+only Skagit fall salmon, Snohomish fall salmon and Stillaguamish salmon and
+gamefish can carry the test. Skagit spring Chinook (Apr–Jul) and summer sockeye
+(Jun–Jul) have no in-season overlap with the pink return and are excluded —
+including them would not test the hypothesis, only dilute it with years whose
+odd/even split is noise. §1 and §2 still cover every fishery.
 
 ```{r}
 #| results: asis
@@ -357,36 +366,18 @@ evidence of no effect. It is a hypothesis worth carrying into the predictive
 model, not a settled coefficient.
 :::
 
-## 4. What this implies for prediction
-
-```{r}
-#| results: asis
-p <- fig_path("fig8_predictive_distribution")
-if (is.null(p)) missing_note("analysis/bss_bias/06_variability_analysis.R") else cat(paste0("![](", p, ")\n"))
-p2 <- fig_path("fig8b_predictive_distribution_trailer")
-if (!is.null(p2)) cat(paste0("\n![](", p2, ")\n"))
-```
-
-The shaded band is the **95% prediction interval for a year we did not
-observe**, built from that fishery's own history. It is the direct answer to
-"what do we use when there is no census data, and how uncertain is it?"
-
-- **Tight band** → historical `b` transfers; use the pooled estimate with its PI.
-- **Wide band** → it does not transfer, and a single historical value would be
-  false precision.
-
-## 5. The conceptual model
+## 4. The conceptual model
 
 A ladder, each rung nesting inside the next. The group's decision is which rung
 to stand on.
 
-| Rung | Model | What it buys |
-|---|---|---|
-| **0** | Use last year's `b` | Status quo. No pooling, no uncertainty propagation. |
-| **1** | `log b̂ᵢᵧ ~ N(log θᵢᵧ, seᵢᵧ²)`, `log θᵢᵧ ~ N(μᵢ, τ²)` | τ² is the variability answer; the prediction interval **is** the predictive distribution |
-| **2** | `log θᵢᵧ ~ N(μᵢ + β·pinkᵧ, τ²)` | β = pink effect; drop in τ² = how much pink explains |
-| **3** | `μᵢ ~ N(M, σ²_river)` | Pools across rivers; a data-poor fishery borrows strength |
-| **4** | Hierarchical `b` **inside** the Stan model | Propagates uncertainty exactly instead of in two stages |
+| Rung | In plain terms | Model | What it buys |
+|---|---|---|---|
+| **0** | `b this year = b last year` | Use last year's `b` | Status quo. No pooling, no uncertainty propagation. |
+| **1** | `b ~ fishery + year-to-year scatter` | `log b̂ᵢᵧ ~ N(log θᵢᵧ, seᵢᵧ²)`, `log θᵢᵧ ~ N(μᵢ, τ²)` | τ² is the variability answer; the prediction interval **is** the predictive distribution |
+| **2** | `b ~ fishery + pink year + year-to-year scatter` | `log θᵢᵧ ~ N(μᵢ + β·pinkᵧ, τ²)` | β = pink effect; drop in τ² = how much pink explains |
+| **3** | `b ~ river + fishery + pink year + year-to-year scatter` | `μᵢ ~ N(M, σ²_river)` | Pools across rivers; a data-poor fishery borrows strength |
+| **4** | the same, but estimated *with* the creel model rather than after it | Hierarchical `b` **inside** the Stan model | Propagates uncertainty exactly instead of in two stages |
 
 ::: {.callout-important}
 ## Rungs 1–3 are an approximation
@@ -396,37 +387,7 @@ approximation to rung 4, and worth stating plainly rather than discovering
 later. Rung 4 is a model rewrite, not a config change.
 :::
 
-## 6. Toy example: does the approach actually work?
-
-Before applying this to real numbers, here it is on a **simulated world where
-the truth is known** -- three rivers, seven years, a known pink effect and
-known between-river and between-year variances.
-
-```{r}
-#| results: asis
-for (nm in c("figA_toy_simulated_world", "figC_toy_variance_components", "figB_toy_prediction_check")) {
-  p <- fig_path(nm)
-  if (!is.null(p)) cat(paste0("![](", p, ")\n\n"))
-}
-if (is.null(fig_path("figA_toy_simulated_world"))) missing_note("analysis/bss_bias/05_predictive_toy.R")
-```
-
-```{r}
-if (!is.null(toy_recovery)) {
-  toy_recovery |>
-    gt() |>
-    tab_header(title = "Parameter recovery on simulated data",
-               subtitle = "Known truth vs. what the method recovered") |>
-    opt_row_striping()
-}
-```
-
-The held-out check is the use case in miniature: drop the most recent year,
-refit on the rest, and ask whether the predictive distribution covers the value
-that was hidden. **If it does not work here, where the truth is known and the
-model is correctly specified, it will not work on the real data.**
-
-## 7. Comparability caveats
+## 5. Comparability caveats
 
 Before comparing `b` across years, the group has to agree which fishery-years
 are comparable at all.
@@ -546,10 +507,13 @@ Rscript analysis/bss_bias/00_discover_fisheries.R
 Rscript analysis/bss_bias/01_fit_bss_bias.R          # the slow one (MCMC)
 Rscript analysis/bss_bias/02_build_comparability_table.R
 Rscript analysis/bss_bias/03_plot_b_series.R
-Rscript analysis/bss_bias/05_predictive_toy.R
 Rscript analysis/bss_bias/06_variability_analysis.R
 quarto render analysis/bss_bias/report/bss_bias_report.qmd
 ```
+
+The companion draft (predictive distributions and the known-truth
+demonstration) additionally needs `05_predictive_toy.R`; see
+`report/draft/bss_bias_next_steps.qmd`.
 
 ### `b` is not `p_TI` in CreelEstimates code
 `b` (this analysis) is the **effort-index bias term**. `p_TI` / `TI_expan` is
