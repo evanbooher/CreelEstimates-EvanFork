@@ -39,6 +39,13 @@ get_bss_bias <- function(
   # has moved away from the prior (see `prior_contraction` below).
   var_prior <- (exp(prior_sigma_b^2) - 1) * exp(prior_sigma_b^2)
 
+  # NOTE: summarise_draws() ignores the `...` argument names below for
+  # formula-wrapped stats::quantile() calls -- it names the resulting column
+  # after quantile()'s own output name ("2.5%", not "q2.5"), confirmed
+  # against a live posterior::summarise_draws() call. Rename explicitly
+  # afterward rather than relying on the argument names, since q2.5/q10/
+  # q90/q97.5 are load-bearing column names downstream (03_plot_b_series.R,
+  # 04_candidate_options.R both read them directly from bss_b_summary.csv).
   summ <- posterior::summarise_draws(
     draws,
     mean, sd, median = ~stats::median(.x),
@@ -49,7 +56,8 @@ get_bss_bias <- function(
     rhat = posterior::rhat,
     ess_bulk = posterior::ess_bulk,
     ess_tail = posterior::ess_tail
-  )
+  ) |>
+    dplyr::rename(q2.5 = `2.5%`, q10 = `10%`, q90 = `90%`, q97.5 = `97.5%`)
 
   summ |>
     dplyr::mutate(
