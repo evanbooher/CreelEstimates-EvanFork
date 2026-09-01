@@ -64,7 +64,10 @@
 #   bss_b_comparability_raw.csv  -- one row per attempted fishery-year, written
 #                                    BEFORE fitting; feeds 02_build_comparability_table.R
 #   bss_b_summary.csv            -- one/two rows (b[1], b[2]) per fishery-year that fit
-#   bss_b_run_ledger.csv         -- one row per attempted fishery-year: status/stage/reason
+#   bss_b_run_ledger.csv         -- one row per attempted fishery-year: status/stage/reason,
+#                                    plus the estimation window actually used
+#                                    (date_start/date_end/n_days_window) for verification --
+#                                    present even for fishery-years that skipped or errored
 #   bss_b_stan_dims.csv          -- D,G,S,H,V_n,T_n,A_n,E_n,IntC,IntA per fishery-year
 #   bss_b_na_drops.csv           -- per fishery-year x group, NA rows dropped before Stan
 #                                    (n_before/n_dropped/n_after; see R_functions/drop_na_bss_inputs.R)
@@ -398,12 +401,16 @@ fishery_target_catch_group <- function(fishery_name) {
 # Per-fishery-year pipeline
 # ------------------------------------------------------------------------------
 
-fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME) {
+fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est_dates = NULL) {
 
   study_design <- resolve_study_design(fishery_name)
   cli::cli_h2("Processing: {.val {fishery_name}} [design: {.val {study_design}}]")
 
-  est_dates  <- run_stage("resolve_dates", resolve_dates(fishery_name, "", ""))
+  # Normally supplied by the driver (which resolves once, so the ledger can
+  # record the window even for fishery-years that fail later). Falls back to
+  # resolving here -- inside run_stage, so a lookup failure is reported as a
+  # staged error -- when called directly, e.g. interactively.
+  est_dates  <- est_dates %||% run_stage("resolve_dates", resolve_dates(fishery_name, "", "", conn = DB_CONN))
   date_start <- suppressWarnings(as.Date(est_dates$est_date_start))
   date_end   <- suppressWarnings(as.Date(est_dates$est_date_end))
 
@@ -633,27 +640,47 @@ target_fisheries <- read_csv(discovery_path, show_col_types = FALSE) |>
 cli::cli_alert_info("{length(target_fisheries)} fishery-year(s) queued at fit_config = {.val {FIT_CONFIG_NAME}}.")
 
 run_ledger <- map(target_fisheries, function(fn) {
+
+  # Resolve the estimation window HERE, in the driver, rather than only inside
+  # fit_one_fishery(): every ledger row can then report the window that was
+  # actually used -- including rows for fishery-years that skip or error
+  # before/at their own resolve_dates() call. That makes the ledger the single
+  # place to verify "what date range did we estimate over for each fishery?"
+  # rather than having to cross-reference bss_b_comparability_raw.csv (which
+  # only has rows for fishery-years that got all the way through data prep).
+  #
+  # Resolved once and passed into fit_one_fishery() so the lookup is not
+  # repeated -- resolve_dates() queries fishery_lut, it is not a free call.
+  est_dates <- tryCatch(resolve_dates(fn, "", "", conn = DB_CONN), error = function(e) NULL)
+  d_start <- suppressWarnings(as.Date(est_dates$est_date_start %||% NA))
+  d_end   <- suppressWarnings(as.Date(est_dates$est_date_end %||% NA))
+  window_cols <- tibble(
+    date_start    = d_start,
+    date_end      = d_end,
+    n_days_window = if (is.na(d_start) || is.na(d_end)) NA_integer_ else as.integer(d_end - d_start + 1)
+  )
+
   withCallingHandlers(
     tryCatch(
       {
-        res <- fit_one_fishery(fn)
-        tibble(fishery_name = fn, status = "ok", stage = NA_character_, reason = NA_character_,
-               runtime_sec = res$runtime_sec)
+        res <- fit_one_fishery(fn, est_dates = est_dates)
+        bind_cols(tibble(fishery_name = fn, status = "ok", stage = NA_character_, reason = NA_character_,
+                         runtime_sec = res$runtime_sec), window_cols)
       },
       fishery_skip = function(cnd) {
         cli::cli_alert_warning("Skipped [{.val {fn}}]: {conditionMessage(cnd)}")
-        tibble(fishery_name = fn, status = "skipped", stage = cnd$stage %||% "unknown",
-               reason = cnd$reason %||% conditionMessage(cnd), runtime_sec = NA_real_)
+        bind_cols(tibble(fishery_name = fn, status = "skipped", stage = cnd$stage %||% "unknown",
+                         reason = cnd$reason %||% conditionMessage(cnd), runtime_sec = NA_real_), window_cols)
       },
       fishery_error = function(cnd) {
         cli::cli_alert_danger("Failed [{.val {fn}}] at stage {.val {cnd$stage}}: {cnd$reason}")
-        tibble(fishery_name = fn, status = "error", stage = cnd$stage %||% "unknown",
-               reason = cnd$reason %||% conditionMessage(cnd), runtime_sec = NA_real_)
+        bind_cols(tibble(fishery_name = fn, status = "error", stage = cnd$stage %||% "unknown",
+                         reason = cnd$reason %||% conditionMessage(cnd), runtime_sec = NA_real_), window_cols)
       },
       error = function(e) {
         cli::cli_alert_danger("Failed [{.val {fn}}] (unstaged): {conditionMessage(e)}")
-        tibble(fishery_name = fn, status = "error", stage = "unstaged",
-               reason = conditionMessage(e), runtime_sec = NA_real_)
+        bind_cols(tibble(fishery_name = fn, status = "error", stage = "unstaged",
+                         reason = conditionMessage(e), runtime_sec = NA_real_), window_cols)
       }
     ),
     warning = function(w) { cli::cli_alert_info("  warning [{.val {fn}}]: {conditionMessage(w)}"); invokeRestart("muffleWarning") }
