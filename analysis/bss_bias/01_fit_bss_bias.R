@@ -566,6 +566,63 @@ restrict_dwg_sections <- function(dwg, fishery_name) {
 }
 
 # ------------------------------------------------------------------------------
+# Angler-type coding
+# ------------------------------------------------------------------------------
+# The BSS likelihood is written for exactly two angler types in a fixed order:
+# p_TI[1,]/R_V[1]/R_T[1] are bank, p_TI[2,]/R_V[2]/R_T[2] are boat. Two of the
+# shared prep functions assign that index with a bare
+#
+#     angler_final_int = as.integer(factor(angler_final))
+#
+# which numbers whatever levels happen to be present, alphabetically. Two ways
+# that goes wrong:
+#
+#   * prep_dwg_interview_angler_types() ends its case_when with TRUE ~ "fail"
+#     and never filters those rows out. Any interview the rules do not classify
+#     -- a missing boat_used, or an NA boat_type, since str_detect(NA, .) is NA
+#     rather than FALSE -- becomes a third level, and G = 3. That is the "three
+#     angler types" in the ledger. There is no third gear.
+#   * prep_dwg_effort_census() computes the code BEFORE dropping "fail", so
+#     bank/boat land on 1/2 whenever a fail row happens to exist. But a fishery
+#     with only boat and fail rows gives boat = 1 -- boat counts handed to the
+#     model as bank. Silent, and invisible to any dimension check.
+#
+# Recoding against fixed levels removes both. Rows that are neither bank nor
+# boat are dropped: the model has nowhere to put them.
+ANGLER_LEVELS <- c("bank", "boat")
+
+recode_angler_final_int <- function(d, table_name) {
+  if (!is.data.frame(d) || !"angler_final" %in% names(d)) {
+    return(list(data = d, n_before = 0L, n_dropped = 0L, n_recoded = 0L, dropped_labels = ""))
+  }
+  n_before <- nrow(d)
+  dropped_labels <- setdiff(unique(d$angler_final), ANGLER_LEVELS)
+  kept <- d |> dplyr::filter(angler_final %in% ANGLER_LEVELS)
+  n_dropped <- n_before - nrow(kept)
+
+  new_int <- as.integer(factor(kept$angler_final, levels = ANGLER_LEVELS))
+  n_recoded <- if ("angler_final_int" %in% names(kept)) {
+    sum(kept$angler_final_int != new_int, na.rm = TRUE)
+  } else 0L
+  kept$angler_final_int <- new_int
+
+  if (n_dropped > 0) {
+    cli::cli_alert_warning(
+      "  {.field {table_name}}: dropped {n_dropped} of {n_before} rows labelled \\
+       {.val {dropped_labels}} -- neither bank nor boat."
+    )
+  }
+  if (n_recoded > 0) {
+    cli::cli_alert_warning(
+      "  {.field {table_name}}: recoded angler_final_int on {n_recoded} rows -- the \\
+       original numbering did not put bank at 1 and boat at 2."
+    )
+  }
+  list(data = kept, n_before = n_before, n_dropped = n_dropped, n_recoded = n_recoded,
+       dropped_labels = paste(sort(dropped_labels), collapse = "|"))
+}
+
+# ------------------------------------------------------------------------------
 # Section alignment
 # ------------------------------------------------------------------------------
 # prep_inputs_bss() sizes the Stan arrays from the CENSUS sections --
@@ -825,6 +882,38 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
     }
   }
 
+  # Force bank = 1 / boat = 2 and drop unclassifiable rows, so G is the number
+  # of real angler types rather than the number of labels. See
+  # recode_angler_final_int() above.
+  recode_tables <- c("interview", "effort_census")
+  angler_recode <- run_stage("angler_recode", {
+    setNames(lapply(recode_tables, function(nm) recode_angler_final_int(dwg_summ[[nm]], nm)),
+             recode_tables)
+  })
+  for (nm in recode_tables) dwg_summ[[nm]] <- angler_recode[[nm]]$data
+  append_csv_row(
+    bind_rows(lapply(recode_tables, function(nm) {
+      r <- angler_recode[[nm]]
+      tibble(fishery_name = fishery_name, table = nm, n_before = r$n_before,
+             n_dropped = r$n_dropped, n_recoded = r$n_recoded, dropped_labels = r$dropped_labels)
+    })),
+    file.path(OUT_DIR, "bss_b_angler_recode.csv")
+  )
+  for (nm in recode_tables) {
+    r <- angler_recode[[nm]]
+    if (nrow(dwg_summ[[nm]]) == 0) {
+      skip_fishery(paste0("No ", nm, " rows classify as bank or boat (all ", r$n_before,
+                          " were ", r$dropped_labels, ")."), stage = "angler_recode")
+    }
+    # Same threshold as the index-effort 'fail' check above: past half, the
+    # study-design assumptions are more likely wrong than the data.
+    if (r$n_before > 0 && r$n_dropped / r$n_before > 0.5) {
+      skip_fishery(paste0(round(100 * r$n_dropped / r$n_before), "% of ", nm,
+                          " rows are unclassifiable under design '", study_design,
+                          "' -- likely wrong study design."), stage = "angler_recode")
+    }
+  }
+
   # Make S, O, p_TI and every section_* index agree before Stan ever sees them.
   # See align_bss_sections() above for why this is needed and why it is a no-op
   # for the fishery-years that already fit.
@@ -870,11 +959,10 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   # positionally, so these only agree when the sections are exactly 1..S with no
   # gaps and the angler types line up between the census and interview tables.
   #
-  # align_bss_sections() above should have made the section axis satisfy this.
-  # These checks are the BACKSTOP: if one still fires, alignment has a case it
-  # does not cover, and the ledger says which. The gear axis is NOT aligned --
-  # G comes from the interview angler types and the likelihood hard-codes two,
-  # so a third is a real modelling limit, not something to renumber away.
+  # recode_angler_final_int() and align_bss_sections() above should have made
+  # both axes satisfy this already. These checks are the BACKSTOP: if one still
+  # fires, one of those two has a case it does not cover, and the ledger says
+  # which.
   sec_idx <- unlist(inputs_bss[c("section_V", "section_T", "section_A",
                                  "section_B", "section_E", "section_IntC", "section_IntA")])
   sec_idx <- as.integer(sec_idx[!is.na(sec_idx)])
@@ -923,8 +1011,10 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   }
   if (inputs_bss$G > 2) {
     skip_fishery(paste0(
-      "G = ", inputs_bss$G, " angler types, but the BSS likelihood hard-codes exactly two ",
-      "(b[1]/b[2] and p_TI[1,]/p_TI[2,]); a third type is silently excluded from the index counts."
+      "G = ", inputs_bss$G, " angler types after recoding to bank/boat, but the BSS ",
+      "likelihood hard-codes exactly two. recode_angler_final_int() should have made ",
+      "this impossible -- an angler_final level it does not know about has reached ",
+      "prep_inputs_bss()."
     ), stage = "bss_preflight")
   }
 
