@@ -197,8 +197,12 @@ composite <- fig1 / fig2 + plot_layout(heights = c(3, 1))
 save_fig(composite, "fig1_fig2_composite", width = 9, height = 12)
 
 # ------------------------------------------------------------------------------
-# Figure 3 -- posterior densities, one panel per fishery-series, sequential
-# year ramp (one hue, light->dark; most recent year emphasized)
+# Figure 3 -- posterior densities OVERLAID per fishery TYPE (name with the
+# year stripped out, so all years of e.g. "Skagit fall salmon" share one
+# panel), alpha transparency, sequential year ramp (one hue, light->dark;
+# most recent year emphasized). Year now needs a real legend -- unlike the
+# earlier ridge-per-row layout, color/fill is the ONLY thing distinguishing
+# years once they're overlaid in shared (x, density) space.
 # ------------------------------------------------------------------------------
 
 draws_files <- list.files(file.path(OUT_DIR, "b_draws"), pattern = "\\.rds$", full.names = TRUE)
@@ -219,18 +223,30 @@ if (length(draws_files) > 0) {
     left_join(comp |> select(fishery_name, basin, fishery_label, year_start), by = "fishery_name")
 
   if (nrow(draws_long) > 0) {
-    seq_ramp <- c("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b")
-    n_years <- draws_long |> distinct(year_start) |> nrow()
-    ramp_fun <- colorRampPalette(seq_ramp)
+    # The year token sits in different positions across naming conventions
+    # ("...salmon 2022" vs. "...Chinook 2024 upper"), so replace (not strip)
+    # it with a space and squish, rather than assuming it's a trailing token.
+    draws_long <- draws_long |>
+      mutate(fishery_type = stringr::str_squish(
+        stringr::str_replace(fishery_name, "\\d{4}(-\\d{2,4})?", " ")
+      ))
 
-    fig3 <- ggplot(draws_long, aes(x = b1, y = factor(year_start), fill = factor(year_start))) +
-      ggridges::geom_density_ridges(alpha = 0.85, color = SURFACE, linewidth = 0.3, scale = 1.4) +
+    seq_ramp <- c("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b")
+    year_levels <- sort(unique(draws_long$year_start))
+    ramp_fun <- colorRampPalette(seq_ramp)
+    year_colors <- setNames(ramp_fun(length(year_levels)), year_levels)
+
+    fig3 <- ggplot(draws_long, aes(x = b1, fill = factor(year_start), color = factor(year_start))) +
+      geom_density(alpha = 0.45, linewidth = 0.4) +
       geom_vline(xintercept = 1, linetype = "dashed", color = INK_MUTED, linewidth = 0.4) +
-      scale_fill_manual(values = ramp_fun(max(n_years, 2)), guide = "none") +
-      facet_wrap(~ fishery_label, scales = "free_x") +
-      labs(title = "b₁ posterior densities by year", subtitle = "Darker = more recent year",
-           x = expression(b[1]), y = NULL) +
-      theme_bss()
+      scale_fill_manual(values = year_colors, name = "Year") +
+      scale_color_manual(values = year_colors, guide = "none") +
+      facet_wrap(~ fishery_type, scales = "free") +
+      labs(title = "b₁ posterior densities, overlaid by year within each fishery",
+           subtitle = "Darker = more recent year. Each panel is one fishery across all its years.",
+           x = expression(b[1]), y = "Density") +
+      theme_bss() +
+      theme(legend.position = "top")
 
     save_fig(fig3, "fig3_posterior_densities", width = 10, height = 8)
   } else {
