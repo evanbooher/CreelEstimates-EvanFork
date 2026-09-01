@@ -751,7 +751,7 @@ run_ledger <- map(target_fisheries, function(fn) {
     n_days_window = if (is.na(d_start) || is.na(d_end)) NA_integer_ else as.integer(d_end - d_start + 1)
   )
 
-  withCallingHandlers(
+  ledger_row <- withCallingHandlers(
     tryCatch(
       {
         res <- fit_one_fishery(fn, est_dates = est_dates)
@@ -776,9 +776,18 @@ run_ledger <- map(target_fisheries, function(fn) {
     ),
     warning = function(w) { cli::cli_alert_info("  warning [{.val {fn}}]: {conditionMessage(w)}"); invokeRestart("muffleWarning") }
   )
-}) |> bind_rows()
 
-write_csv(run_ledger, file.path(OUT_DIR, "bss_b_run_ledger.csv"))
+  # Write the ledger row NOW, not at the end of the run. Every other output is
+  # already per-fishery (comparability/dims/na_drops before the fit,
+  # b-summary + draws immediately after it), so a crash at fishery 20 of 28
+  # kept fisheries 1-19. The ledger was the one exception -- written once
+  # after the whole loop, so a crash lost the record of what had succeeded,
+  # which is exactly when you most need it. Upserted by fishery_name, so it
+  # also accumulates across partial/resumed runs rather than being truncated
+  # to whatever the last invocation happened to cover.
+  append_csv_row(ledger_row, file.path(OUT_DIR, "bss_b_run_ledger.csv"))
+  ledger_row
+}) |> bind_rows()
 
 cli::cli_h2("Run outcomes")
 run_ledger |> count(status) |> print()

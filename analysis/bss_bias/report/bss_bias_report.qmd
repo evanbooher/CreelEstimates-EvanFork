@@ -86,7 +86,7 @@ alongside its index counts. Without census count data the posterior simply repro
 prior, as an assumption, not an estimate.
 
 We expect fishery-years where census data is unavailable, with an immediate resource challenge for 
-Snohomish and Stillguamish fall salmon fisheries. So:
+Snohomish and Stillaguamish fall salmon fisheries. So:
 
 > **First-order question: how variable is `b` across years, rivers and
 > fisheries?** If it is stable, historical estimates transfer to a year we
@@ -507,10 +507,21 @@ Rscript analysis/bss_bias/06_variability_analysis.R
 quarto render analysis/bss_bias/report/bss_bias_report.qmd
 ```
 
-### `b` is not `p_TI`in CreelEstimates code 
+### `b` is not `p_TI` in CreelEstimates code
 `b` (this analysis) is the **effort-index bias term**. `p_TI` / `TI_expan` is
 the **census:index spatial-coverage ratio** -- a different parameter that sits
 adjacent in the same likelihood, and which some code comments confusingly also
 call "the bias parameter". `p_TI` appears here only because a year-to-year
 change in it would distort `b`; it is not the thing being compared.
+
+### How multi-season fisheries are classified odd vs. even
+
+Pink-year parity keys off the **fall run year**, not the calendar span in the
+name. `Stillaguamish salmon and gamefish 2022-23` is a fall-2022 fishery, so it
+counts as **even** (non-pink); `2023-24` counts as odd. Concretely, parity is
+taken from `year_start`, the first year in the name.
+
+This decides which side of the pink contrast the Stillaguamish multi-season
+years land on, so it is worth being explicit about rather than leaving to
+inference from the figures.
 
