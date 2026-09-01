@@ -86,7 +86,7 @@ alongside its index counts. Without census count data the posterior simply repro
 prior, as an assumption, not an estimate.
 
 We expect fishery-years where census data is unavailable, with an immediate resource challenge for 
-Snohomish and Stillguamish fall salmon fisheries. So:
+Snohomish and Stillaguamish fall salmon fisheries. So:
 
 > **First-order question: how variable is `b` across years, rivers and
 > fisheries?** If it is stable, historical estimates transfer to a year we
@@ -507,7 +507,7 @@ Rscript analysis/bss_bias/06_variability_analysis.R
 quarto render analysis/bss_bias/report/bss_bias_report.qmd
 ```
 
-### `b` is not `p_TI`in CreelEstimates code 
+### `b` is not `p_TI` in CreelEstimates code 
 `b` (this analysis) is the **effort-index bias term**. `p_TI` / `TI_expan` is
 the **census:index spatial-coverage ratio** -- a different parameter that sits
 adjacent in the same likelihood, and which some code comments confusingly also
