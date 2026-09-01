@@ -509,6 +509,61 @@ fishery_target_catch_group <- function(fishery_name) {
 }
 
 # ------------------------------------------------------------------------------
+# Section restrictions
+# ------------------------------------------------------------------------------
+# prep_inputs_bss() sizes the Stan arrays with length(unique(section_num)) but
+# indexes them with the RAW section_num (see the positional-index guards in
+# fit_one_fishery). Any gap in a fishery's section numbering therefore reads out
+# of range: Stillaguamish carries sections 1-6 and 8, with no 7, so S = 7 while
+# section_V reaches 8.
+#
+# Restricting Stillaguamish to sections 1-6 closes the gap and lets these
+# fishery-years fit. It is a SCOPE DECISION, not a silent workaround: section 8
+# is dropped from the data entirely, so the resulting `b` describes the 1-6
+# reach only and is not directly comparable to a whole-basin estimate. The
+# ledger records the restriction per fishery-year in `sections_limited_to`.
+SECTION_RESTRICTIONS <- list(
+  list(pattern = regex("Stillaguamish", ignore_case = TRUE), sections = 1:6)
+)
+
+fishery_section_limit <- function(fishery_name) {
+  for (r in SECTION_RESTRICTIONS) {
+    if (str_detect(fishery_name, r$pattern)) return(as.double(r$sections))
+  }
+  NULL
+}
+
+# Applied to every dwg table carrying a section_num, immediately after the fetch
+# so that preflight, prep_days() and prep_inputs_bss() all see the same reduced
+# section set. Rows with a missing section_num are kept: they were usable before
+# the restriction and dropping them would change more than the section scope.
+restrict_dwg_sections <- function(dwg, fishery_name) {
+  keep <- fishery_section_limit(fishery_name)
+  if (is.null(keep)) return(dwg)
+
+  dropped_sections <- numeric(0)
+  dropped_rows <- 0L
+  for (tbl in names(dwg)) {
+    d <- dwg[[tbl]]
+    if (!is.data.frame(d) || !"section_num" %in% names(d)) next
+    present <- suppressWarnings(as.double(unique(na.omit(d$section_num))))
+    dropped_sections <- union(dropped_sections, setdiff(present, keep))
+    kept <- d |> filter(is.na(section_num) | as.double(section_num) %in% keep)
+    n_drop <- nrow(d) - nrow(kept)
+    dropped_rows <- dropped_rows + n_drop
+    if (n_drop > 0) {
+      cli::cli_alert_info("  section restriction [{.field {tbl}}]: dropped {n_drop} row{?s}.")
+    }
+    dwg[[tbl]] <- kept
+  }
+  cli::cli_alert_info(
+    "  Section scope: kept {.val {keep}}; removed {.val {sort(dropped_sections)}} \\
+     ({dropped_rows} rows dropped across all tables)."
+  )
+  dwg
+}
+
+# ------------------------------------------------------------------------------
 # Per-fishery-year pipeline
 # ------------------------------------------------------------------------------
 
@@ -538,6 +593,10 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   # reason. Normalising once here fixes both, and makes the internal and
   # external paths behave identically downstream.
   dwg <- run_stage("normalize_dates", normalize_dwg_dates(dwg))
+
+  # Must run BEFORE preflight so `sections`, prep_days()'s open_section_*
+  # columns and prep_inputs_bss()'s S/O/p_TI all agree on the reduced set.
+  dwg <- run_stage("restrict_sections", restrict_dwg_sections(dwg, fishery_name))
 
   pf <- run_stage("preflight", preflight_fishery(dwg, fishery_name, date_start, date_end, study_design))
 
@@ -861,7 +920,13 @@ run_ledger <- map(target_fisheries, function(fn) {
   window_cols <- tibble(
     date_start    = d_start,
     date_end      = d_end,
-    n_days_window = if (is.na(d_start) || is.na(d_end)) NA_integer_ else as.integer(d_end - d_start + 1)
+    n_days_window = if (is.na(d_start) || is.na(d_end)) NA_integer_ else as.integer(d_end - d_start + 1),
+    # NA = all sections used. A value means this fishery-year's `b` describes
+    # only the listed sections -- see SECTION_RESTRICTIONS.
+    sections_limited_to = {
+      lim <- fishery_section_limit(fn)
+      if (is.null(lim)) NA_character_ else paste(lim, collapse = "|")
+    }
   )
 
   ledger_row <- withCallingHandlers(
