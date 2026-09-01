@@ -1,0 +1,496 @@
+---
+title: "BSS effort-bias term (`b`): interannual variability and a predictive approach"
+subtitle: "Skagit, Snohomish and Stillaguamish -- DFW/tribal technical staff working session"
+date: last-modified
+execute:
+  warning: false
+  message: false
+  echo: false
+format:
+  html:
+    page-layout: full
+    code-tools: true
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    title-block-banner: "#1D886E"
+---
+
+```{r setup}
+library(tidyverse)
+library(here)
+library(gt)
+
+OUT_DIR <- here::here("analysis", "bss_bias", "outputs")
+FIG_DIR <- file.path(OUT_DIR, "figures")
+
+# This report is a PRESENTATION LAYER over analysis/bss_bias/outputs/ -- it
+# reads CSVs and embeds figures that the numbered scripts already produced,
+# and never recomputes anything. That is deliberate: it means the report
+# cannot quietly disagree with the pipeline that generated it, it needs no
+# database or VPN, and it re-renders in seconds after each refit.
+
+read_out <- function(name) {
+  p <- file.path(OUT_DIR, name)
+  if (file.exists(p)) readr::read_csv(p, show_col_types = FALSE) else NULL
+}
+
+fig_path <- function(name) {
+  p <- file.path(FIG_DIR, paste0(name, ".png"))
+  if (file.exists(p)) p else NULL
+}
+
+# Interactive where it earns its keep: tables are for interrogating (sort by
+# b, filter to one river, search a fishery), so they get DT. Figures are for
+# reading, so they are embedded as produced. Falls back to gt if DT is not
+# installed, so the report always renders.
+interactive_table <- function(df, caption = NULL, page_length = 15) {
+  if (is.null(df) || nrow(df) == 0) return(NULL)
+  if (requireNamespace("DT", quietly = TRUE)) {
+    DT::datatable(
+      df, filter = "top", rownames = FALSE, caption = caption,
+      options = list(pageLength = page_length, scrollX = TRUE)
+    )
+  } else {
+    tbl <- gt::gt(df) |> gt::opt_row_striping()
+    if (!is.null(caption)) tbl <- tbl |> gt::tab_header(title = caption)
+    tbl
+  }
+}
+
+missing_note <- function(script) {
+  cat(paste0(
+    "::: {.callout-note}\n## Not yet generated\n",
+    "Run `", script, "` and re-render. This section fills itself in.\n:::\n"
+  ))
+}
+
+T1  <- read_out("bss_b_T1_inventory.csv")
+T2  <- read_out("bss_b_T2_variability.csv")
+T3  <- read_out("bss_b_T3_pink_effect.csv")
+comp <- read_out("bss_b_comparability.csv")
+ledger <- read_out("bss_b_run_ledger.csv")
+toy_recovery <- read_out("bss_b_toy_recovery.csv")
+```
+
+## The question
+
+Freshwater creel estimates from the Bayesian State-Space (BSS) model include an
+**effort-index bias term `b`**: `b[1]` scales the vehicle index count, `b[2]`
+the trailer index count. A prior of `lognormal(0, sigma)` puts its median at
+1 -- "the index count means what we think it means".
+
+`b` is only identified when a fishery-year has **census (tie-in) counts**
+alongside its index counts. Without them the posterior simply reproduces the
+prior. That is an assumption, not an estimate.
+
+We expect fishery-years where census data is unavailable. So:
+
+> **First-order question: how variable is `b` across years, rivers and
+> fisheries?** If it is stable, historical estimates transfer to a year we
+> cannot measure. If it is highly variable, they do not, and we need a
+> defensible way to construct a predictive distribution instead.
+
+That second case is what §5 and §6 set up.
+
+::: {.callout-important}
+## `b` is not `p_TI`
+`b` (this analysis) is the **effort-index bias term**. `p_TI` / `TI_expan` is
+the **census:index spatial-coverage ratio** -- a different parameter that sits
+adjacent in the same likelihood, and which some code comments confusingly also
+call "the bias parameter". `p_TI` appears here only because a year-to-year
+change in it would distort `b`; it is not the thing being compared.
+:::
+
+## How to read this
+
+```{r}
+#| results: asis
+if (!is.null(ledger)) {
+  n_ok <- sum(ledger$status == "ok", na.rm = TRUE)
+  n_skip <- sum(ledger$status == "skipped", na.rm = TRUE)
+  n_err <- sum(ledger$status == "error", na.rm = TRUE)
+  cat(paste0(
+    "This run attempted **", nrow(ledger), " fishery-years**: ",
+    n_ok, " fitted, ", n_skip, " skipped, ", n_err, " errored. ",
+    "Skips are usually structural (no vehicle counts, one angler type) rather than failures -- ",
+    "see the run ledger in the appendix for the reason on each.\n\n"
+  ))
+}
+```
+
+Every number here is reproducible from this repository with **no VPN and no
+database access** (`DATA_SOURCE <- "external"` reads data.wa.gov; the one
+internal-only parameter, the estimation window, is captured in
+`lookup/fishery_params.csv`). Clone the branch and re-run `00` → `06`.
+
+## Headline
+
+```{r}
+#| results: asis
+if (is.null(T2) || is.null(T3)) {
+  missing_note("analysis/bss_bias/06_variability_analysis.R")
+} else {
+  veh2 <- T2 |> filter(bias_type == "vehicle", !is.na(tau))
+  veh3 <- T3 |> filter(bias_type == "vehicle")
+
+  if (nrow(veh2) > 0) {
+    tau_rng <- range(veh2$tau, na.rm = TRUE)
+    # tau is an SD on the log scale, so exp(tau) reads as a multiplicative
+    # year-to-year swing -- the most legible form for a mixed audience.
+    cat(paste0(
+      "- **Interannual variability (b₁, vehicle):** τ ranges ",
+      round(tau_rng[1], 3), " to ", round(tau_rng[2], 3),
+      " across fishery series (log scale). As a multiplicative swing that is roughly ",
+      "×", round(exp(tau_rng[1]), 2), " to ×", round(exp(tau_rng[2]), 2),
+      " year to year, beyond what each year's own uncertainty explains.\n"
+    ))
+    widest <- veh2 |> slice_max(tau, n = 1)
+    cat(paste0(
+      "- **Widest series:** ", widest$fishery_type[1], " (τ = ", round(widest$tau[1], 3),
+      "), prediction interval for a new year ", round(widest$pi_lb[1], 2), " – ",
+      round(widest$pi_ub[1], 2), ".\n"
+    ))
+  }
+  if (nrow(veh3) > 0) {
+    cat(paste0(
+      "- **Pink-year effect (b₁):** ×", round(veh3$pink_ratio[1], 3),
+      " (95% CI ", round(veh3$pink_ci_lo[1], 3), " – ", round(veh3$pink_ci_hi[1], 3),
+      ", p = ", signif(veh3$pink_p[1], 3), "), explaining ",
+      round(veh3$pct_year_var_explained[1], 1), "% of the between-year variance.\n"
+    ))
+    cat(paste0(
+      "- **Where the variance lives (b₁):** between rivers ",
+      round(veh3$var_basin[1], 4), ", between fisheries ", round(veh3$var_fishery[1], 4),
+      ", between years ", round(veh3$var_year[1], 4), ", estimation error ",
+      round(veh3$var_measurement[1], 4), " (log-scale variances).\n"
+    ))
+  }
+}
+```
+
+## 1. Inventory of bias terms
+
+Every `b` estimate in hand, by likelihood type, river and year.
+
+::: {.callout-warning}
+## Read `prior_contraction` before quoting a number
+Prior contraction near 0 means the posterior barely moved off its prior -- the
+estimate reflects the assumption, not the data. **This matters most for
+`b[2]`**: a fishery-year with no trailer index counts still produces a `b[2]`
+posterior. Low variance across such years is the prior talking, not a stable
+bias term.
+:::
+
+```{r}
+#| results: asis
+if (is.null(T1)) missing_note("analysis/bss_bias/06_variability_analysis.R")
+```
+
+```{r}
+if (!is.null(T1)) {
+  T1 |>
+    transmute(
+      Basin = basin, Fishery = fishery_type, Year = year_start,
+      `Year type` = parity, Likelihood = likelihood,
+      b = round(b_median, 3), `q10` = round(q10, 3), `q90` = round(q90, 3),
+      `Prior contraction` = round(prior_contraction, 3),
+      Flag = informed_flag, Tier = comparability_tier,
+      `Window (days)` = n_days_in_window
+    ) |>
+    interactive_table(page_length = 20)
+}
+```
+
+## 2. Interannual variability
+
+`b[1]` (vehicle) and `b[2]` (trailer) across years, by basin. Marker shape
+encodes the comparability tier; see §7 for what the tiers mean.
+
+::: {.panel-tabset}
+
+### b₁ (vehicle)
+
+```{r}
+#| results: asis
+p <- fig_path("fig1_b_vehicle_by_year")
+if (is.null(p)) missing_note("analysis/bss_bias/03_plot_b_series.R") else cat(paste0("![](", p, ")\n"))
+```
+
+### b₂ (trailer)
+
+```{r}
+#| results: asis
+p <- fig_path("fig1b_b_trailer_by_year")
+if (is.null(p)) missing_note("analysis/bss_bias/03_plot_b_series.R") else cat(paste0("![](", p, ")\n"))
+```
+
+### Posterior densities
+
+```{r}
+#| results: asis
+for (nm in c("fig3_posterior_densities", "fig3b_posterior_densities_trailer")) {
+  p <- fig_path(nm)
+  if (!is.null(p)) cat(paste0("![](", p, ")\n\n"))
+}
+if (is.null(fig_path("fig3_posterior_densities"))) missing_note("analysis/bss_bias/03_plot_b_series.R")
+```
+
+:::
+
+### How much of that is real?
+
+The spread of the point estimates mixes two things: genuine year-to-year
+movement in `b`, and uncertainty in measuring each year. **τ² separates them**
+-- it is the variance remaining after each estimate's own uncertainty is
+accounted for. That is why this uses a random-effects fit rather than the
+standard deviation of the point estimates, which would overstate the real
+variability.
+
+```{r}
+#| results: asis
+if (is.null(T2)) missing_note("analysis/bss_bias/06_variability_analysis.R")
+```
+
+```{r}
+if (!is.null(T2)) {
+  T2 |>
+    transmute(
+      Basin = basin, Fishery = fishery_type, Likelihood = bias_type,
+      `N yrs` = n_years, `N informed` = n_informed,
+      b = round(pooled_b, 3),
+      `CI lo` = round(ci_lb, 3), `CI hi` = round(ci_ub, 3),
+      `PI lo` = round(pi_lb, 3), `PI hi` = round(pi_ub, 3),
+      `tau` = round(tau, 3), `I2 (%)` = round(I2, 1), `Q p` = signif(Q_p, 3),
+      `tau2 (informed only)` = round(tau2_informed_only, 4),
+      Note = note
+    ) |>
+    interactive_table()
+}
+```
+
+::: {.callout-note}
+## CI vs PI
+**CI** is the interval on the *mean of past years*. **PI** is where a *new*
+year is expected to fall, and is wider by construction. The PI is the one that
+answers "what do we use for a year we cannot measure" -- quoting the CI in its
+place would understate uncertainty substantially.
+
+`tau2 (informed only)` recomputes τ² over data-informed estimates alone. If it
+is much larger than `tau`², the apparent stability came from prior-dominated
+years sitting near `b = 1`.
+:::
+
+## 3. Pink-year effect
+
+Puget Sound pink salmon return in **odd** years, bringing large effort influxes
+that plausibly shift the vehicle:angler relationship. Multi-season fisheries
+(e.g. "2022-23") take the parity of their **fall run year** -- `2022-23` is a
+fall-2022 fishery, so it counts as even.
+
+```{r}
+#| results: asis
+p <- fig_path("fig7_pink_year_effect")
+if (is.null(p)) missing_note("analysis/bss_bias/06_variability_analysis.R") else cat(paste0("![](", p, ")\n"))
+p2 <- fig_path("fig7b_pink_year_effect_trailer")
+if (!is.null(p2)) cat(paste0("\n![](", p2, ")\n"))
+```
+
+```{r}
+if (!is.null(T3)) {
+  T3 |>
+    transmute(
+      Likelihood = bias_type, `N est` = n_estimates, `N series` = n_series,
+      `Between rivers` = round(var_basin, 4),
+      `Between fisheries` = round(var_fishery, 4),
+      `Between years` = round(var_year, 4),
+      `Estimation error` = round(var_measurement, 4),
+      `Pink ×b` = round(pink_ratio, 3),
+      `CI lo` = round(pink_ci_lo, 3), `CI hi` = round(pink_ci_hi, 3),
+      `p` = signif(pink_p, 3),
+      `% year var. explained` = round(pct_year_var_explained, 1)
+    ) |>
+    interactive_table(page_length = 10)
+}
+```
+
+::: {.callout-warning}
+## How much can this contrast actually carry?
+The pink effect is estimated from a handful of odd years against a handful of
+even ones. Treat a wide CI as what it is -- the design has limited power, not
+evidence of no effect. It is a hypothesis worth carrying into the predictive
+model, not a settled coefficient.
+:::
+
+## 4. What this implies for prediction
+
+```{r}
+#| results: asis
+p <- fig_path("fig8_predictive_distribution")
+if (is.null(p)) missing_note("analysis/bss_bias/06_variability_analysis.R") else cat(paste0("![](", p, ")\n"))
+p2 <- fig_path("fig8b_predictive_distribution_trailer")
+if (!is.null(p2)) cat(paste0("\n![](", p2, ")\n"))
+```
+
+The shaded band is the **95% prediction interval for a year we did not
+observe**, built from that fishery's own history. It is the direct answer to
+"what do we use when there is no census data, and how uncertain is it?"
+
+- **Tight band** → historical `b` transfers; use the pooled estimate with its PI.
+- **Wide band** → it does not transfer, and a single historical value would be
+  false precision.
+
+## 5. The conceptual model
+
+A ladder, each rung nesting inside the next. The group's decision is which rung
+to stand on.
+
+| Rung | Model | What it buys |
+|---|---|---|
+| **0** | Use last year's `b` | Status quo. No pooling, no uncertainty propagation. |
+| **1** | `log b̂ᵢᵧ ~ N(log θᵢᵧ, seᵢᵧ²)`, `log θᵢᵧ ~ N(μᵢ, τ²)` | τ² is the variability answer; the prediction interval **is** the predictive distribution |
+| **2** | `log θᵢᵧ ~ N(μᵢ + β·pinkᵧ, τ²)` | β = pink effect; drop in τ² = how much pink explains |
+| **3** | `μᵢ ~ N(M, σ²_river)` | Pools across rivers; a data-poor fishery borrows strength |
+| **4** | Hierarchical `b` **inside** the Stan model | Propagates uncertainty exactly instead of in two stages |
+
+::: {.callout-important}
+## Rungs 1–3 are an approximation
+They take each year's `se` as fixed and known, rather than propagating the full
+posterior. That is standard practice and defensible, but it is an
+approximation to rung 4, and worth stating plainly rather than discovering
+later. Rung 4 is a model rewrite, not a config change.
+:::
+
+## 6. Toy example: does the approach actually work?
+
+Before applying this to real numbers, here it is on a **simulated world where
+the truth is known** -- three rivers, seven years, a known pink effect and
+known between-river and between-year variances.
+
+```{r}
+#| results: asis
+for (nm in c("figA_toy_simulated_world", "figC_toy_variance_components", "figB_toy_prediction_check")) {
+  p <- fig_path(nm)
+  if (!is.null(p)) cat(paste0("![](", p, ")\n\n"))
+}
+if (is.null(fig_path("figA_toy_simulated_world"))) missing_note("analysis/bss_bias/05_predictive_toy.R")
+```
+
+```{r}
+if (!is.null(toy_recovery)) {
+  toy_recovery |>
+    gt() |>
+    tab_header(title = "Parameter recovery on simulated data",
+               subtitle = "Known truth vs. what the method recovered") |>
+    opt_row_striping()
+}
+```
+
+The held-out check is the use case in miniature: drop the most recent year,
+refit on the rest, and ask whether the predictive distribution covers the value
+that was hidden. **If it does not work here, where the truth is known and the
+model is correctly specified, it will not work on the real data.**
+
+## 7. Comparability caveats
+
+Before comparing `b` across years, the group has to agree which fishery-years
+are comparable at all.
+
+```{r}
+#| results: asis
+p <- fig_path("fig2_comparability_strip")
+if (is.null(p)) missing_note("analysis/bss_bias/03_plot_b_series.R") else cat(paste0("![](", p, ")\n"))
+```
+
+### Season duration and timing
+
+Estimation windows are **not stable across years**. Skagit fall salmon has run
+91–140 days; Snohomish fall salmon 33–91; Stillaguamish 2023-24 was 12 days,
+its season cut short on Chinook impacts. Start dates move by weeks.
+
+This matters directly for the first-order question: **when the window moves,
+some of the year-to-year variation in `b` is a window artifact rather than a
+change in vehicle-index bias.** τ² computed across such years mixes the two.
+
+```{r}
+if (!is.null(comp)) {
+  comp |>
+    transmute(
+      Basin = basin, Fishery = fishery_type, Season = season_label,
+      Tier = comparability_tier,
+      Start = date_start, End = date_end,
+      Days = n_days_in_window, `Open days` = n_days_open,
+      `Start vs ref` = start_shift_days,
+      `Length vs ref` = ifelse(is.na(pct_of_ref_days), NA, paste0(round(100 * pct_of_ref_days), "%")),
+      `CRC area(s)` = crc_areas, `Section(s)` = section_nums,
+      `Count types` = count_types_present
+    ) |>
+    interactive_table(page_length = 20)
+}
+```
+
+### What the tiers mean
+
+Within each series the **most recent year is the reference**; every other year
+is compared against it.
+
+| Tier | Trigger |
+|---|---|
+| `not-estimable` | No vehicle counts -- `b[1]` is not estimated from data at all |
+| `reference` | The anchor year itself |
+| `not-comparable` | Study design, count types, or `p_TI` changed vs. reference |
+| `comparable-with-caveat` | CRC area / sections / season window shifted, or a thin sample |
+| `comparable` | None of the above |
+
+::: {.callout-important}
+## These rules are proposals, not findings
+Three things worth deciding in the room:
+
+1. **Comparable is the default.** A year is `comparable` unless a specific
+   check fires. Anything not on the checklist is invisible to it.
+2. **Season duration and timing are reported but do NOT affect the tier.**
+   `start_shift_days` and `pct_of_ref_days` are shown above and flagged beyond
+   ±14 days / ±25%, but deliberately do not downgrade a year. One line in
+   `02_build_comparability_table.R` changes that if the group wants it to.
+3. **Variance components in §2–3 are computed over ALL fishery-years**, not
+   only comparable ones. A tier-restricted sensitivity run is one filter away
+   (`INCLUDE_TIERS` in `06_variability_analysis.R`).
+:::
+
+## Appendix
+
+### Diagnostics
+
+```{r}
+#| results: asis
+for (nm in c("fig5_information_diagnostic", "fig4_vehicle_vs_trailer_bias")) {
+  p <- fig_path(nm)
+  if (!is.null(p)) cat(paste0("![](", p, ")\n\n"))
+}
+```
+
+### Run ledger
+
+Status, stage and reason for every fishery-year attempted, with the estimation
+window actually used.
+
+```{r}
+if (!is.null(ledger)) interactive_table(ledger, page_length = 20)
+```
+
+### Reproducing this
+
+```bash
+# once, with VPN -- captures the estimation windows, then commit the lookup
+Rscript analysis/bss_bias/00b_capture_fishery_params.R
+
+# no VPN needed from here
+Rscript analysis/bss_bias/00_discover_fisheries.R
+Rscript analysis/bss_bias/01_fit_bss_bias.R          # the slow one (MCMC)
+Rscript analysis/bss_bias/02_build_comparability_table.R
+Rscript analysis/bss_bias/03_plot_b_series.R
+Rscript analysis/bss_bias/05_predictive_toy.R
+Rscript analysis/bss_bias/06_variability_analysis.R
+quarto render analysis/bss_bias/report/bss_bias_report.qmd
+```
