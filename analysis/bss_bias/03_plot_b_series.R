@@ -38,7 +38,8 @@
 #   fig1b_b_trailer_by_year.png/.pdf  -- same chart for b[2] (trailer bias); secondary, not in the composite
 #   fig2_comparability_strip.png/.pdf
 #   fig1_fig2_composite.png/.pdf      -- Figure 1 + 2 stacked, aligned x-axis (the slide)
-#   fig3_posterior_densities.png/.pdf
+#   fig3_posterior_densities.png/.pdf         -- b[1] (vehicle)
+#   fig3b_posterior_densities_trailer.png/.pdf -- b[2] (trailer)
 #   fig4_vehicle_vs_trailer_bias.png/.pdf
 #   fig5_information_diagnostic.png/.pdf
 # ==============================================================================
@@ -216,21 +217,23 @@ composite <- fig1 / fig2 + plot_layout(heights = c(3, 1))
 save_fig(composite, "fig1_fig2_composite", width = 9, height = 12)
 
 # ------------------------------------------------------------------------------
-# Figure 3 -- posterior densities OVERLAID per fishery TYPE (name with the
-# year stripped out, so all years of e.g. "Skagit fall salmon" share one
+# Figure 3 / 3b -- posterior densities OVERLAID per fishery TYPE (name with
+# the year stripped out, so all years of e.g. "Skagit fall salmon" share one
 # panel), alpha transparency, sequential year ramp (one hue, light->dark;
-# most recent year emphasized). Year now needs a real legend -- unlike the
-# earlier ridge-per-row layout, color/fill is the ONLY thing distinguishing
-# years once they're overlaid in shared (x, density) space.
+# most recent year emphasized). Year needs a real legend -- unlike a
+# ridge-per-row layout, color/fill is the ONLY thing distinguishing years
+# once they're overlaid in shared (x, density) space. b_draws/<safe_name>.rds
+# holds BOTH b[1] and b[2] columns (saved together in 01_fit_bss_bias.R), so
+# one parameterized builder produces both figures rather than only ever
+# reading b[1].
 # ------------------------------------------------------------------------------
 
-draws_files <- list.files(file.path(OUT_DIR, "b_draws"), pattern = "\\.rds$", full.names = TRUE)
-if (length(draws_files) > 0) {
+make_posterior_density_fig <- function(draws_files, param_col, param_symbol, x_lab) {
   draws_long <- map_dfr(draws_files, function(f) {
     fn <- tools::file_path_sans_ext(basename(f))
     d <- readRDS(f)
-    if (!("b[1]" %in% names(d))) return(NULL)
-    tibble(fishery_name_safe = fn, b1 = d[["b[1]"]])
+    if (!(param_col %in% names(d))) return(NULL)
+    tibble(fishery_name_safe = fn, val = d[[param_col]])
   })
 
   # match safe_name() back to fishery_name via bss_b_summary's own safe-name mapping
@@ -241,38 +244,51 @@ if (length(draws_files) > 0) {
     left_join(name_map, by = "fishery_name_safe") |>
     left_join(comp |> select(fishery_name, basin, fishery_label, year_start), by = "fishery_name")
 
-  if (nrow(draws_long) > 0) {
-    # The year token sits in different positions across naming conventions
-    # ("...salmon 2022" vs. "...Chinook 2024 upper"), so replace (not strip)
-    # it with a space and squish, rather than assuming it's a trailing token.
-    draws_long <- draws_long |>
-      mutate(fishery_type = stringr::str_squish(
-        stringr::str_replace(fishery_name, "\\d{4}(-\\d{2,4})?", " ")
-      ))
+  if (nrow(draws_long) == 0) return(NULL)
 
-    seq_ramp <- c("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b")
-    year_levels <- sort(unique(draws_long$year_start))
-    ramp_fun <- colorRampPalette(seq_ramp)
-    year_colors <- setNames(ramp_fun(length(year_levels)), year_levels)
+  # The year token sits in different positions across naming conventions
+  # ("...salmon 2022" vs. "...Chinook 2024 upper"), so replace (not strip)
+  # it with a space and squish, rather than assuming it's a trailing token.
+  draws_long <- draws_long |>
+    mutate(fishery_type = stringr::str_squish(
+      stringr::str_replace(fishery_name, "\\d{4}(-\\d{2,4})?", " ")
+    ))
 
-    fig3 <- ggplot(draws_long, aes(x = b1, fill = factor(year_start), color = factor(year_start))) +
-      geom_density(alpha = 0.45, linewidth = 0.4) +
-      geom_vline(xintercept = 1, linetype = "dashed", color = INK_MUTED, linewidth = 0.4) +
-      scale_fill_manual(values = year_colors, name = "Year") +
-      scale_color_manual(values = year_colors, guide = "none") +
-      facet_wrap(~ fishery_type, scales = "free") +
-      labs(title = "b₁ posterior densities, overlaid by year within each fishery",
-           subtitle = "Darker = more recent year. Each panel is one fishery across all its years.",
-           x = expression(b[1]), y = "Density") +
-      theme_bss() +
-      theme(legend.position = "top")
+  seq_ramp <- c("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b")
+  year_levels <- sort(unique(draws_long$year_start))
+  ramp_fun <- colorRampPalette(seq_ramp)
+  year_colors <- setNames(ramp_fun(length(year_levels)), year_levels)
 
+  ggplot(draws_long, aes(x = val, fill = factor(year_start), color = factor(year_start))) +
+    geom_density(alpha = 0.45, linewidth = 0.4) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = INK_MUTED, linewidth = 0.4) +
+    scale_fill_manual(values = year_colors, name = "Year") +
+    scale_color_manual(values = year_colors, guide = "none") +
+    facet_wrap(~ fishery_type, scales = "free") +
+    labs(title = paste0(param_symbol, " posterior densities, overlaid by year within each fishery"),
+         subtitle = "Darker = more recent year. Each panel is one fishery across all its years.",
+         x = x_lab, y = "Density") +
+    theme_bss() +
+    theme(legend.position = "top")
+}
+
+draws_files <- list.files(file.path(OUT_DIR, "b_draws"), pattern = "\\.rds$", full.names = TRUE)
+if (length(draws_files) > 0) {
+  fig3 <- make_posterior_density_fig(draws_files, "b[1]", "b₁", expression(b[1]))
+  if (!is.null(fig3)) {
     save_fig(fig3, "fig3_posterior_densities", width = 10, height = 8)
   } else {
-    cli::cli_alert_warning("No draws matched fishery names for Figure 3 -- skipping.")
+    cli::cli_alert_warning("No draws matched fishery names for Figure 3 (vehicle) -- skipping.")
+  }
+
+  fig3_trailer <- make_posterior_density_fig(draws_files, "b[2]", "b₂", expression(b[2]))
+  if (!is.null(fig3_trailer)) {
+    save_fig(fig3_trailer, "fig3b_posterior_densities_trailer", width = 10, height = 8)
+  } else {
+    cli::cli_alert_warning("No draws matched fishery names for Figure 3b (trailer) -- skipping.")
   }
 } else {
-  cli::cli_alert_warning("No files in outputs/b_draws/ yet -- skipping Figure 3 (run after some fits complete).")
+  cli::cli_alert_warning("No files in outputs/b_draws/ yet -- skipping Figures 3/3b (run after some fits complete).")
 }
 
 # ------------------------------------------------------------------------------
