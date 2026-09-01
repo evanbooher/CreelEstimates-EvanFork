@@ -89,6 +89,19 @@ INFORMED_MIN_CONTRACTION <- 0.10
 b_summary <- read_csv(summary_path, show_col_types = FALSE)
 comp      <- read_csv(comp_path, show_col_types = FALSE)
 
+# A bss_b_comparability.csv written by an earlier version of 02 lacks
+# fishery_type (and the duration/timing columns). Say so plainly rather than
+# failing several steps later with "object 'fishery_type' not found".
+comp_needed <- c("fishery_type", "n_days_in_window", "start_shift_days", "pct_of_ref_days")
+comp_absent <- setdiff(comp_needed, names(comp))
+if (length(comp_absent) > 0) {
+  cli::cli_abort(c(
+    "{.file {comp_path}} is missing column{?s} {.val {comp_absent}}.",
+    "x" = "It was written by an earlier version of 02_build_comparability_table.R.",
+    "i" = "Re-run {.file analysis/bss_bias/02_build_comparability_table.R}, then re-run this script."
+  ))
+}
+
 # ------------------------------------------------------------------------------
 # Analysis frame
 # ------------------------------------------------------------------------------

@@ -414,19 +414,41 @@ some of the year-to-year variation in `b` is a window artifact rather than a
 change in vehicle-index bias.** τ² computed across such years mixes the two.
 
 ```{r}
+#| results: asis
+# Render only the columns this file actually has. A bss_b_comparability.csv
+# written by an earlier version of 02 lacks the newer duration/timing columns,
+# and that is a normal state mid-transition -- it should degrade to a smaller
+# table plus a note saying what to re-run, not kill the render.
+comp_cols <- c(
+  Basin = "basin", Fishery = "fishery_type", Season = "season_label",
+  Tier = "comparability_tier", Start = "date_start", End = "date_end",
+  Days = "n_days_in_window", `Open days` = "n_days_open",
+  `Start vs ref` = "start_shift_days", `Length vs ref` = "pct_of_ref_days",
+  `CRC area(s)` = "crc_areas", `Section(s)` = "section_nums",
+  `Count types` = "count_types_present"
+)
+
 if (!is.null(comp)) {
-  comp |>
-    transmute(
-      Basin = basin, Fishery = fishery_type, Season = season_label,
-      Tier = comparability_tier,
-      Start = date_start, End = date_end,
-      Days = n_days_in_window, `Open days` = n_days_open,
-      `Start vs ref` = start_shift_days,
-      `Length vs ref` = ifelse(is.na(pct_of_ref_days), NA, paste0(round(100 * pct_of_ref_days), "%")),
-      `CRC area(s)` = crc_areas, `Section(s)` = section_nums,
-      `Count types` = count_types_present
-    ) |>
-    interactive_table(page_length = 20)
+  absent <- comp_cols[!comp_cols %in% names(comp)]
+  if (length(absent) > 0) {
+    cat(paste0(
+      "::: {.callout-note}\n## Comparability table predates the current pipeline\n",
+      "`bss_b_comparability.csv` is missing: `", paste(absent, collapse = "`, `"), "`. ",
+      "Re-run `analysis/bss_bias/02_build_comparability_table.R` and re-render to get the full table.\n:::\n\n"
+    ))
+  }
+}
+```
+
+```{r}
+if (!is.null(comp)) {
+  present <- comp_cols[comp_cols %in% names(comp)]
+  d <- comp |> select(all_of(present))
+  if ("Length vs ref" %in% names(d)) {
+    d <- d |> mutate(`Length vs ref` = if_else(is.na(`Length vs ref`), NA_character_,
+                                                paste0(round(100 * `Length vs ref`), "%")))
+  }
+  interactive_table(d, page_length = 20)
 }
 ```
 
