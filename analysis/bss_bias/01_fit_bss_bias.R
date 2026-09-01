@@ -358,7 +358,20 @@ build_catch_groups <- function(dwg_catch, fishery_name) {
                             fin_mark = paste(fm_vals, collapse = "|"), fate = HARVEST_FATE)
   total_group <- tibble(species = paste(spp_present, collapse = "|"), life_stage = paste(ls_vals, collapse = "|"),
                          fin_mark = paste(fm_vals, collapse = "|"), fate = HARVEST_FATE)
-  bind_rows(species_groups, total_group) |> as.data.frame(stringsAsFactors = FALSE)
+
+  # When only one species is present (e.g. "Skagit spring Chinook", "Skagit
+  # summer sockeye"), paste(spp_present, collapse="|") on a single element
+  # just returns that element -- total_group becomes BYTE-IDENTICAL to
+  # species_groups' sole row, same reconstructed est_cg string. Binding both
+  # would give prep_dwg_interview_catch() two replicate sets tagged with the
+  # same est_cg label; filtering to it then returns both combined, doubling
+  # the interview count (the "dims declared vs found" Stan crash). For a
+  # single-species fishery, that lone species group already IS the total.
+  if (length(spp_present) > 1) {
+    bind_rows(species_groups, total_group) |> as.data.frame(stringsAsFactors = FALSE)
+  } else {
+    as.data.frame(species_groups, stringsAsFactors = FALSE)
+  }
 }
 
 # Reconstructs the est_cg string EXACTLY as prep_dwg_interview_catch() builds
