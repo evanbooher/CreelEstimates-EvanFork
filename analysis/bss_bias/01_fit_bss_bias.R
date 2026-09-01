@@ -508,6 +508,12 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME) {
     )
   })
 
+  # Stan hard-errors on any NA anywhere in `data` -- drop NA observation rows
+  # (for expediency; see R_functions/drop_na_bss_inputs.R for what is and
+  # isn't safe to drop) BEFORE the preflight checks below, so V_n/IntA/etc.
+  # reflect the post-drop counts.
+  inputs_bss <- run_stage("drop_na_bss_inputs", drop_na_bss_inputs(inputs_bss, fishery_name = fishery_name))
+
   # BSS-specific preflight: converts a cryptic Stan crash into a ledger row.
   if (inputs_bss$G < 2) skip_fishery("Only one angler type; b[2]/lambda[...,2] out of bounds in the BSS likelihood.", stage = "bss_preflight")
   if (inputs_bss$V_n == 0) skip_fishery("No vehicle index counts; b[1] is not informed by data (would sample its prior).", stage = "bss_preflight")
