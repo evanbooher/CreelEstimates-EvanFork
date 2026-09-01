@@ -402,6 +402,20 @@ validate_days <- function(days, fishery_name) {
 
 safe_name <- function(x) stringr::str_replace_all(x, "[^[:alnum:]]", "_")
 
+# Coerce event_date to Date on every dwg table that has one, whatever the
+# fetch handed back (Date, POSIXct, character, or an untyped column from a
+# zero-row result). substr() to 10 characters first so an ISO timestamp
+# ("2021-05-19T00:00:00.000") parses as cleanly as a bare date; the whole
+# thing is a no-op on a column that is already Date.
+normalize_dwg_dates <- function(dwg) {
+  for (tbl in names(dwg)) {
+    if (is.data.frame(dwg[[tbl]]) && "event_date" %in% names(dwg[[tbl]])) {
+      dwg[[tbl]]$event_date <- as.Date(substr(as.character(dwg[[tbl]]$event_date), 1, 10))
+    }
+  }
+  dwg
+}
+
 # Upserts by fishery_name rather than blindly appending: a re-run of the same
 # fishery-year (routine during troubleshooting, and whenever a fishery gets
 # re-attempted at a higher fit_config after "smoke") replaces its prior
@@ -490,6 +504,16 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   dwg <- run_stage("fetch_data", {
     creelutils::fetch_data(conn = DB_CONN, fishery_name = fishery_name, data_source = DATA_SOURCE)
   })
+
+  # The external (data.wa.gov) path does not reliably hand back event_date as a
+  # Date -- it can arrive as character, which then fails in between() with
+  # "Can't combine `x` <character> and `left` <date>". A table with ZERO rows
+  # does it too: no rows means no type to infer, and the error fires before
+  # preflight can reach its own "no interviews in the window" check, so a
+  # genuinely empty fishery-year reports a type error instead of its real
+  # reason. Normalising once here fixes both, and makes the internal and
+  # external paths behave identically downstream.
+  dwg <- run_stage("normalize_dates", normalize_dwg_dates(dwg))
 
   pf <- run_stage("preflight", preflight_fishery(dwg, fishery_name, date_start, date_end, study_design))
 
