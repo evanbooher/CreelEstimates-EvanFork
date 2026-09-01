@@ -97,41 +97,9 @@ OUT_DIR <- here::here("analysis", "bss_bias", "outputs")
 FIG_DIR <- file.path(OUT_DIR, "figures")
 dir.create(FIG_DIR, recursive = TRUE, showWarnings = FALSE)
 
-# Palette / theme shared with 03_plot_b_series.R. Kept in sync by hand for now
-# (both are small); if a third script needs them, factor them out properly.
-CAT <- c(blue = "#2a78d6", orange = "#eb6834", aqua = "#1baf7a", yellow = "#eda100",
-         magenta = "#e87ba4", green = "#008300", violet = "#4a3aa7", red = "#e34948")
-INK          <- "#0b0b0b"
-INK_SECOND   <- "#52514e"
-INK_MUTED    <- "#898781"
-GRID_COLOR   <- "#e1e0d9"
-BASELINE_COL <- "#c3c2b7"
-SURFACE      <- "#fcfcfb"
-
-theme_bss <- function() {
-  theme_minimal(base_size = 11) +
-    theme(
-      panel.grid.major = element_line(color = GRID_COLOR, linewidth = 0.3),
-      panel.grid.minor = element_blank(),
-      axis.line = element_line(color = BASELINE_COL, linewidth = 0.4),
-      axis.text = element_text(color = INK_SECOND),
-      axis.title = element_text(color = INK_SECOND),
-      plot.title = element_text(color = INK, face = "bold"),
-      plot.subtitle = element_text(color = INK_SECOND),
-      plot.caption = element_text(color = INK_MUTED, size = 8, hjust = 0),
-      strip.text = element_text(color = INK, face = "bold"),
-      legend.position = "bottom",
-      legend.title = element_text(color = INK_SECOND),
-      legend.text = element_text(color = INK_SECOND),
-      plot.background = element_rect(fill = SURFACE, color = NA),
-      panel.background = element_rect(fill = SURFACE, color = NA)
-    )
-}
-
-save_fig <- function(plot, name, width = 9, height = 6) {
-  ggsave(file.path(FIG_DIR, paste0(name, ".png")), plot, width = width, height = height, dpi = 300, bg = SURFACE)
-  ggsave(file.path(FIG_DIR, paste0(name, ".pdf")), plot, width = width, height = height, device = cairo_pdf, bg = SURFACE)
-}
+# Palette, theme and save_fig() come from common.R so the toy figures render
+# as part of the same set as the real ones.
+source(here::here("analysis", "bss_bias", "common.R"))
 
 # ------------------------------------------------------------------------------
 # 1. Simulate a world where the truth is known
@@ -312,7 +280,7 @@ figA <- ggplot(toy_sim, aes(x = year, y = b_hat)) +
   geom_line(aes(y = theta), color = CAT[["aqua"]], linewidth = 0.7, alpha = 0.9) +
   geom_point(aes(fill = factor(pink, levels = c(0, 1), labels = c("even", "odd (pink)"))),
              shape = 21, size = 3, color = SURFACE, stroke = 0.8) +
-  scale_fill_manual(values = c("even" = CAT[["blue"]], "odd (pink)" = CAT[["magenta"]]), name = "Year type") +
+  scale_fill_manual(values = PARITY_COLORS, name = "Year type") +
   facet_wrap(~ river, ncol = 1) +
   labs(
     title = "Toy world: what we simulated",

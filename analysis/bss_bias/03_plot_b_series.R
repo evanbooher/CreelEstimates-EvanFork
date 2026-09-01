@@ -62,21 +62,12 @@ b_summary <- read_csv(summary_path, show_col_types = FALSE)
 comp      <- read_csv(comp_path, show_col_types = FALSE)
 
 # ------------------------------------------------------------------------------
-# Palette (from the dataviz skill's references/palette.md, used verbatim --
-# this is the pre-validated categorical order, not a freehand choice)
+# Palette, theme and save_fig() come from common.R so every script in this
+# analysis renders as one set. Tier colours/shapes stay here -- they are
+# specific to the comparability tier, not shared styling.
 # ------------------------------------------------------------------------------
 
-CAT <- c(blue = "#2a78d6", orange = "#eb6834", aqua = "#1baf7a", yellow = "#eda100",
-         magenta = "#e87ba4", green = "#008300", violet = "#4a3aa7", red = "#e34948")
-
-STATUS <- c(good = "#0ca30c", warning = "#fab219", serious = "#ec835a", critical = "#d03b3b")
-
-INK          <- "#0b0b0b"
-INK_SECOND   <- "#52514e"
-INK_MUTED    <- "#898781"
-GRID_COLOR   <- "#e1e0d9"
-BASELINE_COL <- "#c3c2b7"
-SURFACE      <- "#fcfcfb"
+source(here::here("analysis", "bss_bias", "common.R"))
 
 TIER_COLORS <- c(
   "reference"              = INK_MUTED,
@@ -92,31 +83,6 @@ TIER_SHAPES <- c(
   "not-comparable"            = 1,   # hollow circle
   "not-estimable"               = 4    # x
 )
-
-theme_bss <- function() {
-  theme_minimal(base_size = 11) +
-    theme(
-      panel.grid.major = element_line(color = GRID_COLOR, linewidth = 0.3),
-      panel.grid.minor = element_blank(),
-      axis.line = element_line(color = BASELINE_COL, linewidth = 0.4),
-      axis.text = element_text(color = INK_SECOND),
-      axis.title = element_text(color = INK_SECOND),
-      plot.title = element_text(color = INK, face = "bold"),
-      plot.subtitle = element_text(color = INK_SECOND),
-      plot.caption = element_text(color = INK_MUTED, size = 8, hjust = 0),
-      strip.text = element_text(color = INK, face = "bold"),
-      legend.position = "bottom",
-      legend.title = element_text(color = INK_SECOND),
-      legend.text = element_text(color = INK_SECOND),
-      plot.background = element_rect(fill = SURFACE, color = NA),
-      panel.background = element_rect(fill = SURFACE, color = NA)
-    )
-}
-
-save_fig <- function(plot, name, width = 9, height = 6) {
-  ggsave(file.path(FIG_DIR, paste0(name, ".png")), plot, width = width, height = height, dpi = 300, bg = SURFACE)
-  ggsave(file.path(FIG_DIR, paste0(name, ".pdf")), plot, width = width, height = height, device = cairo_pdf, bg = SURFACE)
-}
 
 # ------------------------------------------------------------------------------
 # Assemble a plotting frame for ONE bias_type ("vehicle" or "trailer"),
@@ -240,23 +206,17 @@ make_posterior_density_fig <- function(draws_files, param_col, param_symbol, x_l
   name_map <- b_summary |> distinct(fishery_name) |>
     mutate(fishery_name_safe = stringr::str_replace_all(fishery_name, "[^[:alnum:]]", "_"))
 
+  # fishery_type (the series a fishery-year belongs to) is derived once in
+  # 02_build_comparability_table.R and read here as data -- see common.R.
   draws_long <- draws_long |>
     left_join(name_map, by = "fishery_name_safe") |>
-    left_join(comp |> select(fishery_name, basin, fishery_label, year_start), by = "fishery_name")
+    left_join(comp |> select(fishery_name, basin, fishery_label, fishery_type, year_start),
+              by = "fishery_name")
 
   if (nrow(draws_long) == 0) return(NULL)
 
-  # The year token sits in different positions across naming conventions
-  # ("...salmon 2022" vs. "...Chinook 2024 upper"), so replace (not strip)
-  # it with a space and squish, rather than assuming it's a trailing token.
-  draws_long <- draws_long |>
-    mutate(fishery_type = stringr::str_squish(
-      stringr::str_replace(fishery_name, "\\d{4}(-\\d{2,4})?", " ")
-    ))
-
-  seq_ramp <- c("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b")
   year_levels <- sort(unique(draws_long$year_start))
-  ramp_fun <- colorRampPalette(seq_ramp)
+  ramp_fun <- colorRampPalette(SEQ_RAMP)
   year_colors <- setNames(ramp_fun(length(year_levels)), year_levels)
 
   ggplot(draws_long, aes(x = val, fill = factor(year_start), color = factor(year_start))) +

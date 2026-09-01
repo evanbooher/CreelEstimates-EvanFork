@@ -40,6 +40,8 @@ library(gt)
 library(cli)
 library(here)
 
+source(here::here("analysis", "bss_bias", "common.R"))
+
 OUT_DIR <- here::here("analysis", "bss_bias", "outputs")
 raw_path <- file.path(OUT_DIR, "bss_b_comparability_raw.csv")
 
@@ -82,6 +84,13 @@ comp <- raw |>
   mutate(
     basin = coalesce(basin, derive_basin(fishery_name)),
     fishery_label = coalesce(fishery_label, fishery_name),
+    # fishery_type = the name with the year removed, i.e. the SERIES a
+    # fishery-year belongs to ("Skagit fall salmon 2022" -> "Skagit fall
+    # salmon"). Derived once here and written to the output, so 03 and 06 read
+    # it as data rather than each re-deriving it with their own regex -- three
+    # copies that have to agree is how grouping quietly diverges between a
+    # figure and the table beside it.
+    fishery_type = fishery_type_from_name(fishery_name),
     season_label = coalesce(season_label, str_extract(fishery_name, "\\d{4}(-\\d{2,4})?")),
     year_start = suppressWarnings(as.integer(str_extract(season_label, "^\\d{4}")))
   ) |>
