@@ -351,10 +351,34 @@ preflight_fishery <- function(dwg, fishery_name, date_start, date_end, study_des
   eff_n <- dwg$effort |> filter(between(event_date, date_start, date_end)) |> nrow()
   if (eff_n == 0) skip_fishery("No effort count records within the estimation window.")
 
-  sections <- sort(unique(na.omit(
-    dwg$interview |> filter(between(event_date, date_start, date_end)) |> pull(section_num)
-  )))
-  if (length(sections) == 0) skip_fishery("No non-missing section_num values on interviews.")
+  # Sections come from the UNION of fishery_manager, effort and interview --
+  # not interviews alone.
+  #
+  # `sections` decides which open_section_* columns prep_days() creates. The
+  # BSS model's dimensions do NOT come from here: prep_inputs_bss() takes both
+  # S and O from effort_census$section_num, and selects O's columns with
+  # any_of(). So:
+  #
+  #   sections is a SUPERSET of the census sections -> the extra
+  #     open_section_* columns are created and then dropped by any_of().
+  #     O and S are unchanged. Harmless.
+  #   sections MISSES a census section -> its open_section_* column is never
+  #     created, any_of() silently skips it, and O comes back with fewer
+  #     columns than S. Stan then fails on a dimension mismatch, far from the
+  #     actual cause.
+  #
+  # That second case is what broke Stillaguamish 2022: a section carrying
+  # census effort counts but no interviews inside the estimation window.
+  # Taking the union guarantees the superset case, which cannot change results
+  # for a fishery that was already working.
+  sections <- sort(unique(na.omit(c(
+    dwg$fishery_manager$section_num,
+    dwg$effort$section_num,
+    dwg$interview$section_num
+  ))))
+  if (length(sections) == 0) {
+    skip_fishery("No non-missing section_num values in fishery_manager, effort or interview.")
+  }
 
   lat  <- suppressWarnings(mean(dwg$ll$centroid_lat, na.rm = TRUE))
   long <- suppressWarnings(mean(dwg$ll$centroid_lon, na.rm = TRUE))
@@ -632,6 +656,23 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
       skip_fishery(paste0(round(100*frac_fail), "% of index effort counts map to 'fail' under design '",
                            study_design, "' -- likely wrong study design."), stage = "effort_index_design")
     }
+  }
+
+  # prep_inputs_bss() takes S from effort_census$section_num but selects O's
+  # columns with any_of(paste0("open_section_", ...)). A census section with no
+  # matching open_section_* column in `days` is therefore dropped SILENTLY, and
+  # O comes back narrower than S -- surfacing much later as an opaque Stan
+  # dimension error. Catch it here, where the cause is still visible.
+  census_sections <- sort(unique(na.omit(dwg_summ$effort_census$section_num)))
+  missing_open <- setdiff(paste0("open_section_", census_sections), names(dwg$days))
+  if (length(missing_open) > 0) {
+    skip_fishery(
+      paste0("Census effort counts reference section(s) with no open_section_* column in `days`: ",
+             paste(sub("^open_section_", "", missing_open), collapse = ", "),
+             ". prep_inputs_bss() would drop them via any_of() and hand Stan an O narrower than S. ",
+             "Sections given to prep_days() were: ", paste(pf$sections, collapse = ", "), "."),
+      stage = "bss_preflight"
+    )
   }
 
   inputs_bss <- run_stage("prep_inputs_bss", {
