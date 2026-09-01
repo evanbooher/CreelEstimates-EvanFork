@@ -517,11 +517,13 @@ fishery_target_catch_group <- function(fishery_name) {
 # of range: Stillaguamish carries sections 1-6 and 8, with no 7, so S = 7 while
 # section_V reaches 8.
 #
-# Restricting Stillaguamish to sections 1-6 closes the gap and lets these
-# fishery-years fit. It is a SCOPE DECISION, not a silent workaround: section 8
-# is dropped from the data entirely, so the resulting `b` describes the 1-6
-# reach only and is not directly comparable to a whole-basin estimate. The
-# ledger records the restriction per fishery-year in `sections_limited_to`.
+# This is a SCOPE DECISION, not the fix for that indexing bug -- section 8 is
+# dropped from the data entirely, so the resulting `b` describes the 1-6 reach
+# only and is not directly comparable to a whole-basin estimate. The ledger
+# records it per fishery-year in `sections_limited_to`. The general indexing
+# fix is align_bss_sections(), which runs afterwards and handles the gaps this
+# restriction does not (a census section missing inside 1-6, or a section in
+# the census counts but not the p_census lookup).
 SECTION_RESTRICTIONS <- list(
   list(pattern = regex("Stillaguamish", ignore_case = TRUE), sections = 1:6)
 )
@@ -561,6 +563,112 @@ restrict_dwg_sections <- function(dwg, fishery_name) {
      ({dropped_rows} rows dropped across all tables)."
   )
   dwg
+}
+
+# ------------------------------------------------------------------------------
+# Section alignment
+# ------------------------------------------------------------------------------
+# prep_inputs_bss() sizes the Stan arrays from the CENSUS sections --
+#   S      = length(unique(effort_census$section_num))
+#   O cols = any_of(paste0("open_section_", unique(effort_census$section_num)))
+#   p_TI   = pivot_wider(census_expan, names_from = section_num)
+# -- but indexes them with the RAW section_num carried on every observation row
+# (section_V, section_T, section_E, section_IntC, ...). Three conditions must
+# therefore hold, and nothing in the pipeline enforces any of them:
+#
+#   1. every observed section is also a census section, or the index exceeds S;
+#   2. the census sections are exactly 1..S with no gaps -- Stillaguamish is
+#      1-6 and 8;
+#   3. census_expan covers the same sections as effort_census, in the same
+#      order, or p_TI's columns are misaligned with the section they price.
+#
+# Restricting Stillaguamish to 1-6 fixes only the "8" half of condition 2. It
+# does nothing when the census counts themselves skip a section inside 1-6, or
+# when census_expan (built from location_type == "Site" rows) covers a
+# different set than effort_census.
+#
+# align_bss_sections() enforces all three: it keeps the sections that have BOTH
+# census effort counts and a p_census entry, drops the rest, and renumbers what
+# is left to a dense 1..S. It is an IDENTITY TRANSFORM whenever the three
+# conditions already hold -- which is every fishery-year that fits today, since
+# they fit precisely because they hold. It also sorts effort_census by section,
+# so unique() hands O's columns back in the same ascending order that
+# census_expan's arrange() gives p_TI's.
+#
+# Renumbering is internal to the model inputs. `b` is one scalar per index count
+# type, so it does not depend on a section's label; the mapping is written to
+# bss_b_section_map.csv so any section-level quantity can be traced back.
+align_bss_sections <- function(dwg_summ, days, fishery_name) {
+  secs_of <- function(d) sort(unique(as.double(na.omit(d$section_num))))
+  census_secs <- secs_of(dwg_summ$effort_census)
+  expan_secs  <- secs_of(dwg_summ$census_expan)
+  usable <- intersect(census_secs, expan_secs)
+
+  if (length(usable) == 0) {
+    skip_fishery(
+      paste0("No section has both census effort counts and a p_census entry. ",
+             "Census sections: ", paste(census_secs, collapse = ", "),
+             "; census_expan sections: ", paste(expan_secs, collapse = ", "), "."),
+      stage = "align_sections"
+    )
+  }
+
+  open_cols <- grep("^open_section_", names(days), value = TRUE)
+  want_open <- paste0("open_section_", as.character(usable))
+  missing_open <- setdiff(want_open, open_cols)
+  if (length(missing_open) > 0) {
+    skip_fishery(
+      paste0("`days` has no open/closed column for section(s) ",
+             paste(sub("^open_section_", "", missing_open), collapse = ", "),
+             ", which carry census counts. prep_days() was given sections: ",
+             paste(sort(unique(na.omit(c(census_secs, expan_secs)))), collapse = ", "), "."),
+      stage = "align_sections"
+    )
+  }
+
+  dropped <- setdiff(union(census_secs, expan_secs), usable)
+  if (length(dropped) > 0) {
+    cli::cli_alert_warning(
+      "  Section alignment: dropping {.val {dropped}} -- present in the census counts \\
+       or the p_census lookup, but not both."
+    )
+  }
+  if (!identical(usable, as.double(seq_along(usable)))) {
+    cli::cli_alert_info(
+      "  Section alignment: renumbering {.val {usable}} -> {.val {seq_along(usable)}} \\
+       so the Stan indices match S = {length(usable)}."
+    )
+  }
+
+  remap <- function(d) {
+    if (!is.data.frame(d) || !"section_num" %in% names(d)) return(d)
+    d |>
+      dplyr::filter(as.double(section_num) %in% usable) |>
+      dplyr::mutate(section_num = as.integer(match(as.double(section_num), usable)))
+  }
+  for (nm in c("interview", "effort_index", "effort_census", "census_expan")) {
+    dwg_summ[[nm]] <- remap(dwg_summ[[nm]])
+  }
+  # unique() on effort_census is what orders O's columns; arrange() is what
+  # orders p_TI's. Sort both so the two agree.
+  dwg_summ$effort_census <- dwg_summ$effort_census |> dplyr::arrange(section_num)
+  dwg_summ$census_expan  <- dwg_summ$census_expan  |> dplyr::arrange(angler_final, section_num)
+
+  keep <- setdiff(names(days), open_cols)
+  open_new <- days[, want_open, drop = FALSE]
+  names(open_new) <- paste0("open_section_", seq_along(usable))
+  days <- dplyr::bind_cols(days[, keep, drop = FALSE], open_new)
+
+  list(
+    dwg_summ = dwg_summ,
+    days     = days,
+    map      = tibble(
+      fishery_name    = fishery_name,
+      section_num_src = usable,
+      section_num_bss = seq_along(usable),
+      sections_dropped = paste(dropped, collapse = "|")
+    )
+  )
 }
 
 # ------------------------------------------------------------------------------
@@ -717,28 +825,19 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
     }
   }
 
-  # prep_inputs_bss() takes S from effort_census$section_num but selects O's
-  # columns with any_of(paste0("open_section_", ...)). A census section with no
-  # matching open_section_* column in `days` is therefore dropped SILENTLY, and
-  # O comes back narrower than S -- surfacing much later as an opaque Stan
-  # dimension error. Catch it here, where the cause is still visible.
-  census_sections <- sort(unique(na.omit(dwg_summ$effort_census$section_num)))
-  missing_open <- setdiff(paste0("open_section_", census_sections), names(dwg$days))
-  if (length(missing_open) > 0) {
-    skip_fishery(
-      paste0("Census effort counts reference section(s) with no open_section_* column in `days`: ",
-             paste(sub("^open_section_", "", missing_open), collapse = ", "),
-             ". prep_inputs_bss() would drop them via any_of() and hand Stan an O narrower than S. ",
-             "Sections given to prep_days() were: ", paste(pf$sections, collapse = ", "), "."),
-      stage = "bss_preflight"
-    )
-  }
+  # Make S, O, p_TI and every section_* index agree before Stan ever sees them.
+  # See align_bss_sections() above for why this is needed and why it is a no-op
+  # for the fishery-years that already fit.
+  aligned <- run_stage("align_sections", align_bss_sections(dwg_summ, dwg$days, fishery_name))
+  dwg_summ  <- aligned$dwg_summ
+  days_bss  <- aligned$days
+  append_csv_row(aligned$map, file.path(OUT_DIR, "bss_b_section_map.csv"))
 
   inputs_bss <- run_stage("prep_inputs_bss", {
     prep_inputs_bss(
       est_catch_group = chosen_ecg,
       period          = PERIOD_BSS,
-      days            = dwg$days,
+      days            = days_bss,
       dwg_summarized  = dwg_summ,
       census_expan    = dwg_summ$census_expan,
       study_design    = study_design,
@@ -770,10 +869,12 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   # Stan indexes p_TI[gear, section], O[, section] and lambda_E_S_I[section, ]
   # positionally, so these only agree when the sections are exactly 1..S with no
   # gaps and the angler types line up between the census and interview tables.
-  # Stillaguamish (sections 1-6 and 8, no 7) is the case that breaks it. This is
-  # a property of the shared prep functions, not of this analysis, so guard and
-  # skip rather than silently re-indexing -- re-indexing here would make these
-  # b estimates incomparable with the production creel estimates.
+  #
+  # align_bss_sections() above should have made the section axis satisfy this.
+  # These checks are the BACKSTOP: if one still fires, alignment has a case it
+  # does not cover, and the ledger says which. The gear axis is NOT aligned --
+  # G comes from the interview angler types and the likelihood hard-codes two,
+  # so a third is a real modelling limit, not something to renumber away.
   sec_idx <- unlist(inputs_bss[c("section_V", "section_T", "section_A",
                                  "section_B", "section_E", "section_IntC", "section_IntA")])
   sec_idx <- as.integer(sec_idx[!is.na(sec_idx)])
