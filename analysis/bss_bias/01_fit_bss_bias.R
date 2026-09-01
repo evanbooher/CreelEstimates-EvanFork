@@ -315,13 +315,17 @@ append_csv_row <- function(row_df, path) {
 }
 
 # ------------------------------------------------------------------------------
-# Catch-group selection rule (see README.md / plan Phase 1 note 0.3): `b` is
-# fit ONCE per fishery-year against a SINGLE catch group, chosen by a rule
-# applied identically to every fishery-year: the est_cg with the most
-# DISTINCT interviewed groups. Species/life-stage/fin-mark alternations are
-# built from OBSERVED values per fishery (mirrors, in reduced form, the
-# build_est_catch_groups() helper on chore/multi-fishery-trip-summary) --
-# this need not match PST harvest scope exactly since `c`/`h` here just need
+# Catch-group selection rule (see README.md): `b` is fit ONCE per fishery-year
+# against the pooled TOTAL SALMON catch group -- all SALMON_SPECIES combined,
+# not any single species and not a "most distinct interviewed groups"
+# heuristic. This mirrors build_est_catch_groups()'s total_group /
+# TOTAL_LABEL convention on chore/multi-fishery-trip-summary's
+# multi_fishery_creel_summary.R, and for the same reason given there ([N1]):
+# species co-occur within interviews, so pooling must happen at the
+# per-interview level BEFORE the CPUE/likelihood calculation, not by summing
+# species-level results afterward -- summing would ignore covariance. Species/
+# life-stage/fin-mark alternations are built from OBSERVED values per fishery.
+# This need not match PST harvest scope exactly since `c`/`h` here just need
 # to be a reasonable, consistently-applied catch definition, not a harvest
 # total. The chosen est_cg string is recorded in every output row.
 # ------------------------------------------------------------------------------
@@ -357,13 +361,15 @@ build_catch_groups <- function(dwg_catch, fishery_name) {
   bind_rows(species_groups, total_group) |> as.data.frame(stringsAsFactors = FALSE)
 }
 
-choose_est_cg <- function(interview_plus_catch) {
-  interview_plus_catch |>
-    filter(!is.na(est_cg)) |>
-    distinct(interview_id, est_cg) |>
-    count(est_cg, sort = TRUE) |>
-    slice(1) |>
-    pull(est_cg)
+# Reconstructs the est_cg string EXACTLY as prep_dwg_interview_catch() builds
+# it (paste0(unlist(one row of species/life_stage/fin_mark/fate), collapse =
+# "_")) for the pooled total-salmon row specifically -- always the LAST row
+# of build_catch_groups()'s output, since total_group is bound after
+# species_groups. Deterministic: no dependence on which group happens to have
+# the most interviews.
+total_salmon_est_cg <- function(catch_groups) {
+  total_row <- catch_groups[nrow(catch_groups), , drop = FALSE]
+  paste0(c(total_row$species, total_row$life_stage, total_row$fin_mark, total_row$fate), collapse = "_")
 }
 
 # ------------------------------------------------------------------------------
@@ -426,9 +432,11 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME) {
                               dwg_catch = dwg$catch, study_design = study_design, est_catch_groups = catch_groups)
   })
 
-  chosen_ecg <- run_stage("choose_ecg", choose_est_cg(interview_plus_catch))
-  if (is.na(chosen_ecg) || length(chosen_ecg) == 0) {
-    skip_fishery("No est_cg survived catch-group assignment.", stage = "choose_ecg")
+  chosen_ecg <- run_stage("choose_ecg", total_salmon_est_cg(catch_groups))
+  if (!chosen_ecg %in% interview_plus_catch$est_cg) {
+    skip_fishery(paste0("Reconstructed total-salmon est_cg ('", chosen_ecg, "') does not match ",
+                         "any est_cg actually produced by prep_dwg_interview_catch() -- catch-group ",
+                         "string construction mismatch, not a data problem."), stage = "choose_ecg")
   }
 
   effort_index_summ <- run_stage("effort_index", {
