@@ -208,6 +208,7 @@ combined <- bind_rows(target, adjacent) |>
     basin = case_when(
       str_detect(fishery_name_raw, regex("skagit", ignore_case = TRUE)) ~ "Skagit",
       str_detect(fishery_name_raw, regex("snohomish", ignore_case = TRUE)) ~ "Snohomish",
+      str_detect(fishery_name_raw, regex("skykomish", ignore_case = TRUE)) ~ "Skykomish",
       str_detect(fishery_name_raw, regex("stillaguamish", ignore_case = TRUE)) ~ "Stillaguamish",
       TRUE ~ str_extract(fishery_name_raw, ADJACENT_BASIN_PATTERN) |> str_to_title()
     ),
