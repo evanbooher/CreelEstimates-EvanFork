@@ -92,6 +92,20 @@ dir.create(DRAWS_DIR, recursive = TRUE, showWarnings = FALSE)
 
 DATA_SOURCE <- "internal"  # <-- change per the 0.A check above if a public path works
 
+# creelutils::fetch_data()'s documented conn = NULL auto-connect-when-internal
+# path does not work against the currently installed creelutils version --
+# confirmed locally: fetch_data(fishery_name=, data_source="internal") errors
+# "`conn` is required" even after a successful DB connection message. Fix:
+# open ONE connection here (matches the pattern in chore/multi-fishery-trip-
+# summary's multi_fishery_creel_summary.R) and pass it explicitly into every
+# fetch_data() call below, instead of reconnecting per fishery-year.
+DB_CONN <- if (identical(DATA_SOURCE, "internal")) {
+  cli::cli_alert_info("Connecting to internal DB...")
+  creelutils::connect_creel_db()
+} else {
+  NULL  # ignored by fetch_data() when data_source == "external"
+}
+
 # Standardize on ONE Stan model version for every fishery-year. `b`'s
 # declaration/prior/likelihood placement is identical across all four model
 # files in stan_models/ (verified by inspection), so this choice does not
@@ -364,7 +378,7 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME) {
   date_end   <- suppressWarnings(as.Date(est_dates$est_date_end))
 
   dwg <- run_stage("fetch_data", {
-    creelutils::fetch_data(fishery_name = fishery_name, data_source = DATA_SOURCE)
+    creelutils::fetch_data(conn = DB_CONN, fishery_name = fishery_name, data_source = DATA_SOURCE)
   })
 
   pf <- run_stage("preflight", preflight_fishery(dwg, fishery_name, date_start, date_end, study_design))
@@ -611,3 +625,5 @@ if (any(run_ledger$status == "skipped")) { cli::cli_h3("Skipped"); run_ledger |>
 
 cli::cli_alert_success("Done. See analysis/bss_bias/outputs/ for bss_b_summary.csv, bss_b_comparability_raw.csv, bss_b_run_ledger.csv.")
 cli::cli_alert_info("Next: Rscript analysis/bss_bias/02_build_comparability_table.R (fast, no fits needed) and 03_plot_b_series.R / 04_candidate_options.R once bss_b_summary.csv has rows.")
+
+if (!is.null(DB_CONN)) try(DBI::dbDisconnect(DB_CONN), silent = TRUE)
