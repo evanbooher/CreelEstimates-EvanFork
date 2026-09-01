@@ -79,3 +79,63 @@ fishery_type_from_name <- function(x) {
 year_parity_label <- function(year_start) {
   dplyr::if_else(year_start %% 2 == 1, "odd (pink)", "even")
 }
+
+# ------------------------------------------------------------------------------
+# Series colours, keyed on TARGET SPECIES rather than one arbitrary hue per
+# series.
+#
+# Six unrelated hues for six series reads as a rainbow and makes a reader learn
+# six arbitrary pairings. Colouring by target species instead means a reader
+# learns three -- and the grouping is the analytically meaningful one, because
+# the target species IS the catch group each fit ran against
+# (fishery_target_catch_group() in 01: Chinook / Coho / Sockeye). So "orange =
+# a Coho-target fishery" holds across every basin panel.
+#
+# Where one basin has several series on the same target (Skagit spring Chinook
+# lower and upper), they take light/dark shades of that target's hue -- related
+# fisheries look related, which is the whole point.
+# ------------------------------------------------------------------------------
+
+TARGET_COLORS <- c(
+  Chinook = CAT[["blue"]],
+  Coho    = CAT[["orange"]],
+  Sockeye = CAT[["violet"]],
+  Other   = INK_MUTED
+)
+
+# Blend a hex colour toward white (amount > 0) or black (amount < 0).
+# Base R only -- not worth a colorspace dependency for this.
+shade_color <- function(hex, amount) {
+  v <- grDevices::col2rgb(hex)[, 1]
+  target <- if (amount >= 0) c(255, 255, 255) else c(0, 0, 0)
+  out <- v + (target - v) * abs(amount)
+  grDevices::rgb(out[1], out[2], out[3], maxColorValue = 255)
+}
+
+# est_cg is built as species_lifestage_finmark_fate, so the target species is
+# everything before the first underscore.
+target_species_from_est_cg <- function(est_cg) {
+  sp <- stringr::str_extract(as.character(est_cg), "^[^_]+")
+  dplyr::if_else(sp %in% names(TARGET_COLORS), sp, "Other")
+}
+
+# Named colour vector over fishery_type, shaded within each target species.
+# `df` needs fishery_type and target_species columns.
+series_palette_by_target <- function(df) {
+  key <- df |>
+    dplyr::distinct(fishery_type, target_species) |>
+    dplyr::filter(!is.na(fishery_type)) |>
+    dplyr::arrange(target_species, fishery_type)
+
+  shaded <- purrr::map_dfr(split(key, key$target_species), function(g) {
+    base <- TARGET_COLORS[[g$target_species[1]]]
+    n <- nrow(g)
+    # One series on this target keeps the base hue; several spread light->dark
+    # so they stay recognisably the same species.
+    amounts <- if (n == 1) 0 else seq(0.35, -0.25, length.out = n)
+    g$color <- vapply(amounts, function(a) shade_color(base, a), character(1))
+    g
+  })
+
+  stats::setNames(shaded$color, shaded$fishery_type)
+}

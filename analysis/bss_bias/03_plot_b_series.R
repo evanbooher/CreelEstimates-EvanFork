@@ -99,7 +99,8 @@ build_bias_plot_df <- function(bias_type_val) {
     ) |>
     mutate(
       comparability_tier = replace_na(comparability_tier, "not-estimable"),
-      basin = factor(basin, levels = c("Skagit", "Snohomish", "Stillaguamish"))
+      basin = factor(basin, levels = c("Skagit", "Snohomish", "Stillaguamish")),
+      target_species = target_species_from_est_cg(est_cg)
     )
 }
 
@@ -108,15 +109,20 @@ if (nrow(plot_df) == 0) {
   cli::cli_abort("No vehicle-bias rows to plot -- bss_b_summary.csv may be empty (no fits completed yet).")
 }
 
-# Colors assigned from EVERY fishery in b_summary (not just vehicle rows), so
-# a given fishery is the same color in both the vehicle and trailer figures
-# -- a reader matching a series across the two plots shouldn't have to
-# re-learn the color key. facet_wrap(~basin) already separates basins, so
-# Snohomish/Stillaguamish's single series each still reads unambiguously
-# despite not sharing one "neutral" color the way Skagit's four don't either.
-all_series    <- b_summary |> left_join(comp |> select(fishery_name, fishery_type), by = "fishery_name") |>
-  distinct(fishery_type) |> pull(fishery_type) |> sort()
-series_colors <- setNames(unname(CAT)[((seq_along(all_series) - 1) %% length(CAT)) + 1], all_series)
+# Colours come from EVERY series in b_summary (not just vehicle rows), so a
+# fishery is the same colour in the vehicle and trailer figures -- a reader
+# matching a series across the two plots shouldn't have to re-learn the key.
+#
+# Keyed on TARGET SPECIES (see series_palette_by_target() in common.R): one hue
+# per Chinook / Coho / Sockeye, with light-dark shades where a basin runs
+# several series on the same target (Skagit spring Chinook lower vs upper).
+# Six unrelated hues read as a rainbow and made Chinook, sockeye and fall
+# salmon indistinguishable at a glance; this way the colour says what the fit
+# was actually run against.
+series_key <- b_summary |>
+  left_join(comp |> select(fishery_name, fishery_type), by = "fishery_name") |>
+  mutate(target_species = target_species_from_est_cg(est_cg))
+series_colors <- series_palette_by_target(series_key)
 
 # ------------------------------------------------------------------------------
 # Figure 1 / 1b -- b[1] (vehicle) and b[2] (trailer) vs year, by basin,
