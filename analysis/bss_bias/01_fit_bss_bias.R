@@ -704,9 +704,23 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   if (any(is.na(unlist(inputs_bss[c("V_I","T_I","A_A")])))) {
     cli::cli_abort("[bss_preflight] NA values in core count vectors for {.val {fishery_name}} -- data problem, not a skip.")
   }
-  if (nrow(inputs_bss$p_TI) != inputs_bss$G || ncol(inputs_bss$p_TI) != inputs_bss$S) {
-    cli::cli_abort("[bss_preflight] p_TI dims ({nrow(inputs_bss$p_TI)}x{ncol(inputs_bss$p_TI)}) don't match G x S ({inputs_bss$G}x{inputs_bss$S}) for {.val {fishery_name}}.")
-  }
+  # --- Positional-index guards ------------------------------------------------
+  # prep_inputs_bss() takes DIMENSIONS as counts but INDICES as raw values:
+  #   S = length(unique(effort_census$section_num))   but section_V = section_num
+  #   G = length(unique(interview$angler_final_int))  but gear_E    = angler_final_int
+  # Stan indexes p_TI[gear, section], O[, section] and lambda_E_S_I[section, ]
+  # positionally, so these only agree when the sections are exactly 1..S with no
+  # gaps and the angler types line up between the census and interview tables.
+  # Stillaguamish (sections 1-6 and 8, no 7) is the case that breaks it. This is
+  # a property of the shared prep functions, not of this analysis, so guard and
+  # skip rather than silently re-indexing -- re-indexing here would make these
+  # b estimates incomparable with the production creel estimates.
+  sec_idx <- unlist(inputs_bss[c("section_V", "section_T", "section_A",
+                                 "section_B", "section_E", "section_IntC", "section_IntA")])
+  sec_idx <- as.integer(sec_idx[!is.na(sec_idx)])
+  gear_idx <- unlist(inputs_bss[c("gear_A", "gear_B", "gear_E", "gear_IntC", "gear_IntA")])
+  gear_idx <- as.integer(gear_idx[!is.na(gear_idx)])
+
   b_trailer_informed <- inputs_bss$T_n > 0
   if (!b_trailer_informed) cli::cli_alert_warning("  No trailer index counts; b[2] will be prior-dominated.")
   b_weakly_informed <- inputs_bss$IntA < MIN_INTA_INFORMATIVE
@@ -716,9 +730,43 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
     fishery_name = fishery_name, D = inputs_bss$D, G = inputs_bss$G, S = inputs_bss$S, H = inputs_bss$H,
     V_n = inputs_bss$V_n, T_n = inputs_bss$T_n, A_n = inputs_bss$A_n, E_n = inputs_bss$E_n,
     IntC = inputs_bss$IntC, IntA = inputs_bss$IntA,
+    section_max = if (length(sec_idx)) max(sec_idx) else NA_integer_,
+    gear_max = if (length(gear_idx)) max(gear_idx) else NA_integer_,
+    p_TI_dim = paste0(nrow(inputs_bss$p_TI), "x", ncol(inputs_bss$p_TI)),
     b_trailer_informed = b_trailer_informed, b_weakly_informed = b_weakly_informed
   )
   append_csv_row(stan_dims_row, file.path(OUT_DIR, "bss_b_stan_dims.csv"))
+
+  if (length(sec_idx) > 0 && max(sec_idx) > inputs_bss$S) {
+    skip_fishery(paste0(
+      "Non-contiguous section numbering: S = ", inputs_bss$S,
+      " census sections, but section index ", max(sec_idx),
+      " appears in the observation arrays (sections present: ",
+      paste(sort(unique(sec_idx)), collapse = ", "),
+      "). Stan indexes p_TI/O positionally, so this reads out of range."
+    ), stage = "bss_preflight")
+  }
+  if (length(gear_idx) > 0 && max(gear_idx) > inputs_bss$G) {
+    skip_fishery(paste0(
+      "Angler-type index ", max(gear_idx), " exceeds G = ", inputs_bss$G,
+      "; census and interview angler types are not the same set."
+    ), stage = "bss_preflight")
+  }
+  if (nrow(inputs_bss$p_TI) != inputs_bss$G || ncol(inputs_bss$p_TI) != inputs_bss$S) {
+    skip_fishery(paste0(
+      "p_TI is ", nrow(inputs_bss$p_TI), "x", ncol(inputs_bss$p_TI),
+      " but G x S is ", inputs_bss$G, "x", inputs_bss$S,
+      ". G comes from interview angler types and S from census sections, while p_TI ",
+      "comes from the census-expansion lookup; when they disagree the coverage ",
+      "term is misaligned with the gear/section it is applied to."
+    ), stage = "bss_preflight")
+  }
+  if (inputs_bss$G > 2) {
+    skip_fishery(paste0(
+      "G = ", inputs_bss$G, " angler types, but the BSS likelihood hard-codes exactly two ",
+      "(b[1]/b[2] and p_TI[1,]/p_TI[2,]); a third type is silently excluded from the index counts."
+    ), stage = "bss_preflight")
+  }
 
   # --- Fit ------------------------------------------------------------------
 
