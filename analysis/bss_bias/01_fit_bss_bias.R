@@ -54,9 +54,12 @@
 #       "not enough time."
 # ------------------------------------------------------------------------------
 #
-# Outputs (analysis/bss_bias/outputs/), all written incrementally (append-as-
-# you-go, not once at the end -- a crash partway through must not lose prior
-# results):
+# Outputs (analysis/bss_bias/outputs/), all written incrementally (as-you-go,
+# not once at the end -- a crash partway through must not lose prior
+# results) and UPSERTED by fishery_name (append_csv_row() below) -- re-
+# running a fishery-year (e.g. re-attempting at "quick" after "smoke", or
+# just retrying after a fix) replaces its prior row(s) rather than
+# accumulating duplicates alongside them:
 #   bss_b_comparability_raw.csv  -- one row per attempted fishery-year, written
 #                                    BEFORE fitting; feeds 02_build_comparability_table.R
 #   bss_b_summary.csv            -- one/two rows (b[1], b[2]) per fishery-year that fit
@@ -310,8 +313,23 @@ validate_days <- function(days, fishery_name) {
 
 safe_name <- function(x) stringr::str_replace_all(x, "[^[:alnum:]]", "_")
 
+# Upserts by fishery_name rather than blindly appending: a re-run of the same
+# fishery-year (routine during troubleshooting, and whenever a fishery gets
+# re-attempted at a higher fit_config after "smoke") replaces its prior
+# row(s) instead of accumulating duplicates alongside them. Still safe for
+# the incremental/crash-resilient design goal -- an interrupted run leaves
+# every OTHER fishery's rows untouched; only the fishery-year being written
+# right now is ever removed-then-re-added. Every row_df passed in here
+# carries a fishery_name column (comparability_row, stan_dims_row,
+# bias_summary, na_drop_log all do).
 append_csv_row <- function(row_df, path) {
-  readr::write_csv(row_df, path, append = file.exists(path))
+  if (file.exists(path)) {
+    existing <- readr::read_csv(path, show_col_types = FALSE) |>
+      dplyr::filter(!(fishery_name %in% row_df$fishery_name))
+    readr::write_csv(dplyr::bind_rows(existing, row_df), path)
+  } else {
+    readr::write_csv(row_df, path)
+  }
 }
 
 # ------------------------------------------------------------------------------
