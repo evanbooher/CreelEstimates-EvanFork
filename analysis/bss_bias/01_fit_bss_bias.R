@@ -263,6 +263,13 @@ FIT_CONFIGS <- list(
 )
 FIT_CONFIG_NAME <- "smoke"   # <-- default is the fast/throwaway config; change to "quick" once smoke passes, "prod" for backfill later
 
+# Restrict the run to specific fishery-year(s) without touching the discovery
+# CSV -- for proving one fishery end to end before committing to the full
+# queue, or re-running a single failure. NULL runs everything with
+# include_in_run == TRUE. Entries not in that set are reported and ignored.
+#   e.g. ONLY_FISHERIES <- c("Skagit fall salmon 2024")
+ONLY_FISHERIES <- NULL
+
 SAVE_FITS <- FALSE   # TRUE keeps the full stanfit per fishery-year (large!); the small
                       # b-summary + draws are the actual deliverable and are always saved.
 
@@ -702,6 +709,23 @@ target_fisheries <- read_csv(discovery_path, show_col_types = FALSE) |>
   filter(basin_match == "target", include_in_run) |>
   pull(fishery_name_raw) |>
   unique()
+
+if (!is.null(ONLY_FISHERIES)) {
+  not_queued <- setdiff(ONLY_FISHERIES, target_fisheries)
+  if (length(not_queued) > 0) {
+    cli::cli_alert_warning(
+      "ONLY_FISHERIES entr{?y/ies} not in the include_in_run set, ignored: {.val {not_queued}}"
+    )
+  }
+  target_fisheries <- intersect(target_fisheries, ONLY_FISHERIES)
+  if (length(target_fisheries) == 0) {
+    cli::cli_abort(c(
+      "ONLY_FISHERIES matched no fishery-year in the include_in_run set.",
+      "i" = "Check spelling against {.file {discovery_path}}, or set {.code ONLY_FISHERIES <- NULL} to run everything."
+    ))
+  }
+  cli::cli_alert_info("ONLY_FISHERIES is set -- restricting this run to {length(target_fisheries)} fishery-year(s).")
+}
 
 cli::cli_alert_info("{length(target_fisheries)} fishery-year(s) queued at fit_config = {.val {FIT_CONFIG_NAME}}.")
 
