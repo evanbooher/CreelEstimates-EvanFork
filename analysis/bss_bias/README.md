@@ -102,6 +102,20 @@ Run in order:
    effort/interview-level data may exist and could feed step 2 directly
    without a DB pull at all. See the "public-data path" note below.
 
+1b. **`00b_capture_fishery_params.R`** -- **VPN required; run once, commit the
+   result. Participants do not run this.** Captures the one remaining
+   VPN-only parameter -- the estimation window (`resolve_dates()` reads
+   `creelutils::fishery_lut()`, which has no `data.wa.gov` equivalent) --
+   into `lookup/fishery_params.csv`. Step 2 reads that file whenever
+   `DATA_SOURCE` is `"external"`, which is what makes a no-VPN run possible.
+
+   It records the *resolved* window, not the raw lookup-table columns, on
+   purpose: `resolve_dates()` computes `resolved_end = min(fishery_end_date,
+   Sys.Date() - 1)`, so for an **in-season** fishery the window depends on
+   what day the script runs. Pinning it in a committed file makes two runs on
+   different days comparable -- something the live lookup cannot guarantee,
+   VPN or not.
+
 2. **`01_fit_bss_bias.R`** -- the main driver. For each included
    fishery-year: fetch data, prep BSS inputs, fit the Stan model, extract
    `b`. Writes a **comparability row per fishery-year BEFORE fitting**, so

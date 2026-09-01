@@ -131,6 +131,72 @@ DB_CONN <- if (identical(DATA_SOURCE, "internal")) {
   NULL  # ignored by fetch_data() when data_source == "external"
 }
 
+# ------------------------------------------------------------------------------
+# Estimation window: the one remaining VPN-only dependency, and how an
+# external run gets around it.
+#
+# resolve_dates() reads creelutils::fishery_lut(), which is internal-DB only --
+# there is no data.wa.gov equivalent, and the public Socrata fishery registry
+# (vkjc-s5u8) carries fishery_name but no start/end dates. So under
+# DATA_SOURCE = "external" we read the windows captured by
+# 00b_capture_fishery_params.R instead of querying.
+#
+# That is not only a VPN workaround. resolve_dates() computes
+#   resolved_end = min(fishery_end_date, Sys.Date() - 1)
+# so for an IN-SEASON fishery the window depends on what day the script runs.
+# Reading a committed capture pins the window, making two runs on different
+# days comparable -- which the live lookup cannot guarantee.
+# ------------------------------------------------------------------------------
+
+FISHERY_PARAMS_PATH <- here::here("analysis", "bss_bias", "lookup", "fishery_params.csv")
+
+FISHERY_PARAMS <- if (file.exists(FISHERY_PARAMS_PATH)) {
+  read_csv(FISHERY_PARAMS_PATH, show_col_types = FALSE)
+} else {
+  NULL
+}
+
+if (!identical(DATA_SOURCE, "internal")) {
+  if (is.null(FISHERY_PARAMS)) {
+    cli::cli_abort(c(
+      "DATA_SOURCE is {.val {DATA_SOURCE}} but {.file {FISHERY_PARAMS_PATH}} does not exist.",
+      "x" = "Estimation windows cannot be resolved without it (fishery_lut is VPN-only).",
+      "i" = "Run {.file analysis/bss_bias/00b_capture_fishery_params.R} once with VPN and commit the result,",
+      "i" = "or set {.code DATA_SOURCE <- \"internal\"} if you have DB access."
+    ))
+  }
+  cli::cli_alert_info(
+    "Using estimation windows captured {.val {FISHERY_PARAMS$captured_at[1]}} \\
+     ({nrow(FISHERY_PARAMS)} fishery-year(s)) -- no VPN required."
+  )
+}
+
+# Single entry point for "what window does this fishery-year use?", so the
+# internal and external paths cannot drift apart. Returns NULL (not an error)
+# when unresolvable; callers decide whether that is a skip.
+resolve_window <- function(fishery_name) {
+  if (identical(DATA_SOURCE, "internal")) {
+    return(tryCatch(resolve_dates(fishery_name, "", "", conn = DB_CONN), error = function(e) NULL))
+  }
+  row <- FISHERY_PARAMS |>
+    filter(fishery_name == .env$fishery_name, resolve_status == "ok")
+  if (nrow(row) != 1) return(NULL)
+  list(est_date_start = as.character(row$est_date_start[1]),
+       est_date_end   = as.character(row$est_date_end[1]))
+}
+
+# Message for the skip when resolve_window() comes back empty -- names the
+# actual remedy rather than just reporting the symptom.
+window_skip_reason <- function() {
+  if (identical(DATA_SOURCE, "internal")) {
+    "Could not resolve estimation window from fishery_lut."
+  } else {
+    paste0("No captured estimation window for this fishery in lookup/fishery_params.csv. ",
+           "Re-run 00b_capture_fishery_params.R with VPN to capture it, or set ",
+           "DATA_SOURCE <- \"internal\" if you have DB access.")
+  }
+}
+
 # Standardize on ONE Stan model version for every fishery-year. `b`'s
 # declaration/prior/likelihood placement is identical across all four model
 # files in stan_models/ (verified by inspection), so this choice does not
@@ -408,9 +474,9 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
 
   # Normally supplied by the driver (which resolves once, so the ledger can
   # record the window even for fishery-years that fail later). Falls back to
-  # resolving here -- inside run_stage, so a lookup failure is reported as a
-  # staged error -- when called directly, e.g. interactively.
-  est_dates  <- est_dates %||% run_stage("resolve_dates", resolve_dates(fishery_name, "", "", conn = DB_CONN))
+  # resolving here when called directly, e.g. interactively.
+  est_dates <- est_dates %||% resolve_window(fishery_name)
+  if (is.null(est_dates)) skip_fishery(window_skip_reason(), stage = "resolve_dates")
   date_start <- suppressWarnings(as.Date(est_dates$est_date_start))
   date_end   <- suppressWarnings(as.Date(est_dates$est_date_end))
 
@@ -650,8 +716,9 @@ run_ledger <- map(target_fisheries, function(fn) {
   # only has rows for fishery-years that got all the way through data prep).
   #
   # Resolved once and passed into fit_one_fishery() so the lookup is not
-  # repeated -- resolve_dates() queries fishery_lut, it is not a free call.
-  est_dates <- tryCatch(resolve_dates(fn, "", "", conn = DB_CONN), error = function(e) NULL)
+  # repeated -- under DATA_SOURCE = "internal" this queries fishery_lut, which
+  # is not a free call.
+  est_dates <- resolve_window(fn)
   d_start <- suppressWarnings(as.Date(est_dates$est_date_start %||% NA))
   d_end   <- suppressWarnings(as.Date(est_dates$est_date_end %||% NA))
   window_cols <- tibble(
