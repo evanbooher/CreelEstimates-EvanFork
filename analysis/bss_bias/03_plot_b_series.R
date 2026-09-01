@@ -35,6 +35,7 @@
 #
 # Outputs (analysis/bss_bias/outputs/figures/):
 #   fig1_b_vehicle_by_year.png/.pdf   -- the hero figure
+#   fig1b_b_trailer_by_year.png/.pdf  -- same chart for b[2] (trailer bias); secondary, not in the composite
 #   fig2_comparability_strip.png/.pdf
 #   fig1_fig2_composite.png/.pdf      -- Figure 1 + 2 stacked, aligned x-axis (the slide)
 #   fig3_posterior_densities.png/.pdf
@@ -117,63 +118,81 @@ save_fig <- function(plot, name, width = 9, height = 6) {
 }
 
 # ------------------------------------------------------------------------------
-# Assemble the plotting frame: vehicle bias (b[1]) joined to comparability
+# Assemble a plotting frame for ONE bias_type ("vehicle" or "trailer"),
+# joined to comparability -- shared by Figure 1 (vehicle) and Figure 1b
+# (trailer) below.
 # ------------------------------------------------------------------------------
 
-plot_df <- b_summary |>
-  filter(bias_type == "vehicle") |>
-  left_join(
-    comp |> select(fishery_name, basin, fishery_label, season_label, year_start, comparability_tier),
-    by = "fishery_name"
-  ) |>
-  mutate(
-    comparability_tier = replace_na(comparability_tier, "not-estimable"),
-    basin = factor(basin, levels = c("Skagit", "Snohomish", "Stillaguamish"))
-  )
+build_bias_plot_df <- function(bias_type_val) {
+  b_summary |>
+    filter(bias_type == bias_type_val) |>
+    left_join(
+      comp |> select(fishery_name, basin, fishery_label, season_label, year_start, comparability_tier),
+      by = "fishery_name"
+    ) |>
+    mutate(
+      comparability_tier = replace_na(comparability_tier, "not-estimable"),
+      basin = factor(basin, levels = c("Skagit", "Snohomish", "Stillaguamish"))
+    )
+}
 
+plot_df <- build_bias_plot_df("vehicle")
 if (nrow(plot_df) == 0) {
   cli::cli_abort("No vehicle-bias rows to plot -- bss_b_summary.csv may be empty (no fits completed yet).")
 }
 
-# Every distinct fishery gets its own color + a proper legend -- direct
-# end-labels (ggrepel) got unreadable once real data showed 3-4 series
-# bunched within a fraction of a year of each other at close b values;
-# color/shape symbology scales far better than text placement here.
-# facet_wrap(~basin) already separates basins, so Snohomish/Stillaguamish's
-# single series each still reads unambiguously despite no longer sharing one
-# "neutral" color -- simpler than maintaining two color-assignment rules.
-all_series   <- plot_df |> distinct(fishery_label) |> pull(fishery_label) |> sort()
+# Colors assigned from EVERY fishery in b_summary (not just vehicle rows), so
+# a given fishery is the same color in both the vehicle and trailer figures
+# -- a reader matching a series across the two plots shouldn't have to
+# re-learn the color key. facet_wrap(~basin) already separates basins, so
+# Snohomish/Stillaguamish's single series each still reads unambiguously
+# despite not sharing one "neutral" color the way Skagit's four don't either.
+all_series    <- b_summary |> left_join(comp |> select(fishery_name, fishery_label), by = "fishery_name") |>
+  distinct(fishery_label) |> pull(fishery_label) |> sort()
 series_colors <- setNames(unname(CAT)[((seq_along(all_series) - 1) %% length(CAT)) + 1], all_series)
 
 # ------------------------------------------------------------------------------
-# Figure 1 -- the hero: b[1] vs year, by basin, comparability-tier-encoded
+# Figure 1 / 1b -- b[1] (vehicle) and b[2] (trailer) vs year, by basin,
+# comparability-tier-encoded. Same chart for both parameters so they read as
+# a matched pair -- only the bias_type filter, axis label, and title differ.
 # ------------------------------------------------------------------------------
 
-fig1 <- ggplot(plot_df, aes(x = year_start, y = median, group = fishery_label, color = fishery_label)) +
-  geom_hline(yintercept = 1, linetype = "dashed", color = INK_MUTED, linewidth = 0.4) +
-  geom_segment(aes(xend = year_start, y = q2.5, yend = q97.5), linewidth = 0.5, alpha = 0.55, lineend = "round") +
-  geom_segment(aes(xend = year_start, y = q10, yend = q90), linewidth = 1.4, lineend = "round") +
-  geom_line(linewidth = 0.6, alpha = 0.7) +
-  geom_point(aes(shape = comparability_tier, fill = fishery_label), size = 3, stroke = 1) +
-  scale_color_manual(values = series_colors, name = "Fishery") +
-  scale_fill_manual(values = series_colors, guide = "none") +
-  scale_shape_manual(values = TIER_SHAPES, name = "Comparability tier") +
-  facet_wrap(~ basin, ncol = 1, scales = "free_y") +
-  labs(
-    title = "BSS vehicle-count bias (b₁) across years",
-    subtitle = "Thick segment = 80% credible interval (q10–q90); thin segment = 95% (q2.5–q97.5). Dashed line = b=1 (\"no bias\").",
-    x = NULL, y = expression(b[1]~"(vehicle bias)"),
-    caption = paste0(
-      "Model: ", unique(b_summary$model_file)[1], " | fit config: ", unique(b_summary$fit_config)[1],
-      " | prior: lognormal(0, ", unique(b_summary$prior_sigma)[1], ") | est_cg: fixed per-fishery-name target ",
-      "(Chinook/Coho/Sockeye harvest -- see README.md's Catch-group selection).\n",
-      "Marker shape encodes comparability tier (see Figure 2 / bss_b_comparability.csv) -- open circle = not-comparable, x = not-estimable."
-    )
-  ) +
-  theme_bss() +
-  theme(legend.position = "top")
+make_b_series_fig <- function(plot_df, param_label, y_lab) {
+  ggplot(plot_df, aes(x = year_start, y = median, group = fishery_label, color = fishery_label)) +
+    geom_hline(yintercept = 1, linetype = "dashed", color = INK_MUTED, linewidth = 0.4) +
+    geom_segment(aes(xend = year_start, y = q2.5, yend = q97.5), linewidth = 0.5, alpha = 0.55, lineend = "round") +
+    geom_segment(aes(xend = year_start, y = q10, yend = q90), linewidth = 1.4, lineend = "round") +
+    geom_line(linewidth = 0.6, alpha = 0.7) +
+    geom_point(aes(shape = comparability_tier, fill = fishery_label), size = 3, stroke = 1) +
+    scale_color_manual(values = series_colors, name = "Fishery") +
+    scale_fill_manual(values = series_colors, guide = "none") +
+    scale_shape_manual(values = TIER_SHAPES, name = "Comparability tier") +
+    facet_wrap(~ basin, ncol = 1, scales = "free_y") +
+    labs(
+      title = paste0("BSS ", param_label, " across years"),
+      subtitle = "Thick segment = 80% credible interval (q10–q90); thin segment = 95% (q2.5–q97.5). Dashed line = b=1 (\"no bias\").",
+      x = NULL, y = y_lab,
+      caption = paste0(
+        "Model: ", unique(b_summary$model_file)[1], " | fit config: ", unique(b_summary$fit_config)[1],
+        " | prior: lognormal(0, ", unique(b_summary$prior_sigma)[1], ") | est_cg: fixed per-fishery-name target ",
+        "(Chinook/Coho/Sockeye harvest -- see README.md's Catch-group selection).\n",
+        "Marker shape encodes comparability tier (see Figure 2 / bss_b_comparability.csv) -- open circle = not-comparable, x = not-estimable."
+      )
+    ) +
+    theme_bss() +
+    theme(legend.position = "top")
+}
 
+fig1 <- make_b_series_fig(plot_df, "vehicle-count bias (b₁)", expression(b[1]~"(vehicle bias)"))
 save_fig(fig1, "fig1_b_vehicle_by_year", width = 9, height = 9)
+
+plot_df_trailer <- build_bias_plot_df("trailer")
+if (nrow(plot_df_trailer) == 0) {
+  cli::cli_alert_warning("No trailer-bias rows to plot -- skipping Figure 1b.")
+} else {
+  fig1_trailer <- make_b_series_fig(plot_df_trailer, "trailer-count bias (b₂)", expression(b[2]~"(trailer bias)"))
+  save_fig(fig1_trailer, "fig1b_b_trailer_by_year", width = 9, height = 9)
+}
 
 # ------------------------------------------------------------------------------
 # Figure 2 -- comparability strip, x-aligned under Figure 1
