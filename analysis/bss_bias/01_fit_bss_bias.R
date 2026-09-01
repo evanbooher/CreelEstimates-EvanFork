@@ -261,7 +261,7 @@ FIT_CONFIGS <- list(
   quick = list(n_chain = 2, n_cores = 2, n_iter = 600,  n_warmup = 300,  n_thin = 1, adapt_delta = 0.80, max_treedepth = 11),
   prod  = list(n_chain = 4, n_cores = 4, n_iter = 2000, n_warmup = 1000, n_thin = 1, adapt_delta = 0.95, max_treedepth = 13)
 )
-FIT_CONFIG_NAME <- "smoke"   # <-- default is the fast/throwaway config; change to "quick" once smoke passes, "prod" for backfill later
+FIT_CONFIG_NAME <- "quick"   # <-- default is the fast/throwaway config; change to "quick" once smoke passes, "prod" for backfill later
 
 # Restrict the run to specific fishery-year(s) without touching the discovery
 # CSV -- for proving one fishery end to end before committing to the full
