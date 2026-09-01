@@ -23,8 +23,11 @@
 #     their documented order
 #   - identity is never color-alone: shape/linetype double-encode
 #     comparability tier alongside its status color
-#   - one axis; a legend for >=2 series, direct end-labels for <=4 (Skagit's
-#     4 concurrent fisheries); recessive gridlines/axes; thin lines
+#   - one axis; a legend for every series (color/shape symbology, not direct
+#     text labels -- tried end-labels for Skagit's <=4 concurrent fisheries
+#     first, but real data has series close enough in year/value that
+#     ggrepel-placed labels became illegible; a legend scales better);
+#     recessive gridlines/axes; thin lines
 #
 # Usage:
 #   Rscript analysis/bss_bias/03_plot_b_series.R
@@ -132,38 +135,29 @@ if (nrow(plot_df) == 0) {
   cli::cli_abort("No vehicle-bias rows to plot -- bss_b_summary.csv may be empty (no fits completed yet).")
 }
 
-# Skagit gets a distinct color per named fishery (<=4 series -> legend AND
-# direct labels, per the skill). Snohomish/Stillaguamish are single-series
-# panels and share one neutral primary color -- the visual asymmetry (four
-# tracked colors vs. one) communicates "Skagit is a different kind of
-# problem" without a caption having to say so.
-skagit_series <- plot_df |> filter(basin == "Skagit") |> distinct(fishery_label) |> pull(fishery_label) |> sort()
-skagit_colors <- setNames(unname(CAT)[seq_along(skagit_series)], skagit_series)
-single_series_color <- unname(CAT[["blue"]])
-
-series_color_for <- function(basin, fishery_label) {
-  if_else(basin == "Skagit", skagit_colors[fishery_label], single_series_color)
-}
-plot_df <- plot_df |> mutate(series_color = series_color_for(as.character(basin), fishery_label))
+# Every distinct fishery gets its own color + a proper legend -- direct
+# end-labels (ggrepel) got unreadable once real data showed 3-4 series
+# bunched within a fraction of a year of each other at close b values;
+# color/shape symbology scales far better than text placement here.
+# facet_wrap(~basin) already separates basins, so Snohomish/Stillaguamish's
+# single series each still reads unambiguously despite no longer sharing one
+# "neutral" color -- simpler than maintaining two color-assignment rules.
+all_series   <- plot_df |> distinct(fishery_label) |> pull(fishery_label) |> sort()
+series_colors <- setNames(unname(CAT)[((seq_along(all_series) - 1) %% length(CAT)) + 1], all_series)
 
 # ------------------------------------------------------------------------------
 # Figure 1 -- the hero: b[1] vs year, by basin, comparability-tier-encoded
 # ------------------------------------------------------------------------------
 
-fig1 <- ggplot(plot_df, aes(x = year_start, y = median, group = fishery_label, color = series_color)) +
+fig1 <- ggplot(plot_df, aes(x = year_start, y = median, group = fishery_label, color = fishery_label)) +
   geom_hline(yintercept = 1, linetype = "dashed", color = INK_MUTED, linewidth = 0.4) +
   geom_segment(aes(xend = year_start, y = q2.5, yend = q97.5), linewidth = 0.5, alpha = 0.55, lineend = "round") +
   geom_segment(aes(xend = year_start, y = q10, yend = q90), linewidth = 1.4, lineend = "round") +
-  geom_line(aes(group = fishery_label), linewidth = 0.6, alpha = 0.7) +
-  geom_point(aes(shape = comparability_tier, fill = series_color), size = 3, stroke = 1) +
-  scale_color_identity() +
-  scale_fill_identity() +
+  geom_line(linewidth = 0.6, alpha = 0.7) +
+  geom_point(aes(shape = comparability_tier, fill = fishery_label), size = 3, stroke = 1) +
+  scale_color_manual(values = series_colors, name = "Fishery") +
+  scale_fill_manual(values = series_colors, guide = "none") +
   scale_shape_manual(values = TIER_SHAPES, name = "Comparability tier") +
-  ggrepel::geom_text_repel(
-    data = plot_df |> group_by(fishery_label) |> filter(year_start == max(year_start)) |> ungroup(),
-    aes(label = fishery_label), color = INK_SECOND, size = 3, direction = "y",
-    nudge_x = 0.6, hjust = 0, segment.color = NA, show.legend = FALSE
-  ) +
   facet_wrap(~ basin, ncol = 1, scales = "free_y") +
   labs(
     title = "BSS vehicle-count bias (b₁) across years",
@@ -171,13 +165,13 @@ fig1 <- ggplot(plot_df, aes(x = year_start, y = median, group = fishery_label, c
     x = NULL, y = expression(b[1]~"(vehicle bias)"),
     caption = paste0(
       "Model: ", unique(b_summary$model_file)[1], " | fit config: ", unique(b_summary$fit_config)[1],
-      " | prior: lognormal(0, ", unique(b_summary$prior_sigma)[1], ") | est_cg selection: most-interviewed catch group per fishery-year.\n",
+      " | prior: lognormal(0, ", unique(b_summary$prior_sigma)[1], ") | est_cg: fixed per-fishery-name target ",
+      "(Chinook/Coho/Sockeye harvest -- see README.md's Catch-group selection).\n",
       "Marker shape encodes comparability tier (see Figure 2 / bss_b_comparability.csv) -- open circle = not-comparable, x = not-estimable."
     )
   ) +
   theme_bss() +
-  theme(legend.position = "top") +
-  guides(color = "none", fill = "none")
+  theme(legend.position = "top")
 
 save_fig(fig1, "fig1_b_vehicle_by_year", width = 9, height = 9)
 
