@@ -75,6 +75,15 @@ library(tidyverse)
 library(cli)
 library(here)
 library(rstan)
+# Without this, stan() recompiles the model from C++ source on EVERY call --
+# not just the first -- since there is no compiled-model cache to read from
+# or write to. With it, stan_model() writes a hashed .rds cache next to the
+# .stan file after the first compile and reuses it on every subsequent call
+# (same model file = same hash), including across separate Rscript runs.
+# Matches template_scripts/fw_creel.Rmd's setup; missing here was turning
+# the README's expected "one-time ~1-3 min recompile" into a recompile on
+# every one of the ~29 queued fishery-years.
+rstan_options(auto_write = TRUE)
 library(posterior)
 library(creelutils)
 library(timeDate)
