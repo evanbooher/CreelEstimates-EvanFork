@@ -5,9 +5,19 @@
 #   Turn the raw per-fishery comparability rows written by 01_fit_bss_bias.R
 #   (bss_b_comparability_raw.csv -- written BEFORE Stan fitting, for every
 #   fishery-year that made it through data prep) into the standalone
-#   comparability deliverable: a basin x year x named-fishery table of date
-#   windows, spatial coverage, and survey-design flags, with an explicit
-#   comparability tier per row.
+#   comparability deliverable: a basin x year x named-fishery table of season
+#   duration and timing, spatial coverage, and survey-design flags, with an
+#   explicit comparability tier per row.
+#
+#   SEASON DURATION AND TIMING are shown alongside the other comparability
+#   factors, not just as a month span. They vary far more than the month span
+#   suggests -- Skagit fall salmon runs 91-140 days across years, Snohomish
+#   fall salmon 33-91, and Stillaguamish 2023-24 was 12 days (season cut
+#   short on Chinook impacts). Some of the interannual variation in `b` is
+#   therefore a window artifact rather than a change in vehicle-index bias,
+#   which matters directly when interpreting how variable `b` is across
+#   years. start_shift_days / pct_of_ref_days quantify it per fishery-year;
+#   both are REPORTED ONLY and do not affect the tier (see the case_when()).
 #
 #   NO MCMC REQUIRED. This script only needs bss_b_comparability_raw.csv to
 #   exist with at least one row -- it does not read bss_b_summary.csv or any
@@ -81,6 +91,18 @@ comp <- raw |>
 # Per-series (basin x fishery_label) comparison against the most recent year
 # ------------------------------------------------------------------------------
 
+# Tolerances for the season duration/timing comparison. Explicit and
+# renegotiable, like the tier rules below -- state them in the room.
+# Chosen to be loose enough that ordinary year-to-year scheduling jitter does
+# not flag, but tight enough to catch a season that is materially shorter or
+# starts in a different part of the run:
+#   Skagit fall salmon runs 91-140 days across years; Snohomish 33-91.
+#   Stillaguamish 2023-24 was 12 days (season cut short on Chinook impacts) --
+#   a real management action, and exactly the kind of thing that should be
+#   visible in this table rather than buried in the raw CSV.
+DURATION_TOL_PCT <- 0.25   # window length within +/-25% of the reference year
+TIMING_TOL_DAYS  <- 14     # season start within +/-14 days of the reference year's start
+
 comp <- comp |>
   group_by(basin, fishery_label) |>
   arrange(desc(year_start), .by_group = TRUE) |>
@@ -93,6 +115,15 @@ comp <- comp |>
     ref_p_TI_bank           = p_TI_bank[is_reference][1],
     ref_p_TI_boat            = p_TI_boat[is_reference][1],
     ref_study_design          = study_design[is_reference][1],
+    ref_n_days                 = n_days_in_window[is_reference][1],
+    ref_start_doy               = as.integer(format(date_start[is_reference][1], "%j")),
+
+    # DURATION and TIMING, relative to the reference year. season_month_span
+    # alone misses both: it treats Aug 14 and Aug 30 as the same start, and a
+    # 91-day and a 140-day "Sep-Nov" window as identical.
+    start_doy          = as.integer(format(date_start, "%j")),
+    start_shift_days   = start_doy - ref_start_doy,
+    pct_of_ref_days    = n_days_in_window / ref_n_days,
 
     flag_crc_changed      = !is_reference & (crc_areas != ref_crc_areas),
     flag_sections_changed  = !is_reference & (section_nums != ref_section_nums),
@@ -104,7 +135,17 @@ comp <- comp |>
     ),
     flag_design_changed        = !is_reference & (study_design != ref_study_design),
     flag_no_vehicle_counts       = !has_vehicle_counts,
-    flag_thin_intA                 = FALSE  # filled in below once bss_b_stan_dims.csv is joined, if available
+    flag_thin_intA                 = FALSE,  # filled in below once bss_b_stan_dims.csv is joined, if available
+
+    # REPORTED AND FLAGGED, but deliberately NOT wired into comparability_tier
+    # below -- surfacing season duration/timing is a different decision from
+    # letting it downgrade a fishery-year, and that second one belongs to the
+    # group. To make them count, add these two to the "comparable-with-caveat"
+    # line of the case_when().
+    flag_duration_changed = !is_reference & !is.na(pct_of_ref_days) &
+      abs(pct_of_ref_days - 1) > DURATION_TOL_PCT,
+    flag_timing_shifted   = !is_reference & !is.na(start_shift_days) &
+      abs(start_shift_days) > TIMING_TOL_DAYS
   ) |>
   ungroup() |>
   arrange(basin, fishery_label, desc(year_start))
@@ -150,28 +191,62 @@ tier_colors <- c(
 )
 
 display <- comp |>
-  select(basin, fishery_label, season_label, chosen_est_cg, season_month_span,
-         crc_areas, section_nums, study_design, count_types_present,
-         p_TI_bank, p_TI_boat, comparability_tier,
+  select(basin, fishery_label, season_label, comparability_tier,
+         # Season duration and timing, up front rather than derived-and-hidden:
+         # these were already computed into bss_b_comparability_raw.csv but
+         # never surfaced, so a 12-day season and a 140-day one looked alike.
+         date_start, date_end, n_days_in_window, n_days_open,
+         start_shift_days, pct_of_ref_days, season_month_span,
+         chosen_est_cg, crc_areas, section_nums, study_design, count_types_present,
+         p_TI_bank, p_TI_boat,
+         flag_duration_changed, flag_timing_shifted,
          flag_crc_changed, flag_sections_changed, flag_window_shifted,
          flag_pTI_changed, flag_design_changed, flag_counttypes_changed,
          flag_no_vehicle_counts, flag_thin_intA)
 
 # Render booleans as plain glyphs rather than relying on a specific gt version's
 # fmt_icon() (icon-font support varies by gt version) -- keeps this robust for
-# an unattended overnight/next-morning run.
+# an unattended overnight/next-morning run. Formatted BEFORE the boolean
+# conversion so the numeric columns keep their types.
 display <- display |>
+  mutate(
+    pct_of_ref_days  = if_else(is.na(pct_of_ref_days), NA_character_,
+                                paste0(round(100 * pct_of_ref_days), "%")),
+    start_shift_days = case_when(
+      is.na(start_shift_days)  ~ NA_character_,
+      start_shift_days == 0     ~ "—",
+      start_shift_days > 0      ~ paste0("+", start_shift_days, "d"),
+      TRUE                       ~ paste0(start_shift_days, "d")
+    )
+  ) |>
   mutate(across(starts_with("flag_"), ~ if_else(.x, "changed", "—")))
 
 gt_tbl <- display |>
   gt(groupname_col = "basin", rowname_col = "season_label") |>
   tab_header(title = "BSS effort-bias (b) comparability table",
-             subtitle = "Reviewed BEFORE the b-vs-year plots -- see README.md") |>
+             subtitle = "Season duration and timing shown alongside the other comparability factors -- see README.md") |>
   data_color(columns = comparability_tier,
              fn = scales::col_factor(palette = unname(tier_colors), domain = names(tier_colors))) |>
-  cols_label(fishery_label = "Fishery", season_month_span = "Season window",
+  tab_spanner(label = "Season duration & timing",
+              columns = c(date_start, date_end, n_days_in_window, n_days_open,
+                          start_shift_days, pct_of_ref_days, season_month_span)) |>
+  tab_spanner(label = "Spatial & design",
+              columns = c(crc_areas, section_nums, study_design, count_types_present,
+                          p_TI_bank, p_TI_boat)) |>
+  cols_label(fishery_label = "Fishery", season_month_span = "Month span",
+             date_start = "Start", date_end = "End",
+             n_days_in_window = "Days", n_days_open = "Open days",
+             start_shift_days = "Start vs ref", pct_of_ref_days = "Length vs ref",
              crc_areas = "CRC area(s)", section_nums = "Section(s)",
              comparability_tier = "Tier") |>
+  tab_footnote(
+    footnote = paste0(
+      "Start vs ref / Length vs ref compare each year to the most recent year in its series. ",
+      "Flagged beyond +/-", TIMING_TOL_DAYS, " days or +/-", round(100 * DURATION_TOL_PCT),
+      "% respectively. These are REPORTED ONLY -- they do not currently affect the Tier."
+    ),
+    locations = cells_column_labels(columns = c(start_shift_days, pct_of_ref_days))
+  ) |>
   opt_row_striping()
 
 gt::gtsave(gt_tbl, file.path(OUT_DIR, "bss_b_comparability.html"))
