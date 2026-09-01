@@ -145,10 +145,13 @@ either way: `p_census_bank`/`boat` feed the `p_TI`/census-tie-in spatial-
 coverage correction (a defunct-in-practice, DIFFERENT parameter -- see "What
 'the bias term' is" above), not `b`'s identification.
 
-So `DATA_SOURCE <- "external"` in `01_fit_bss_bias.R` is a viable VPN-free
-option for the whole pipeline. The default remains `DATA_SOURCE <-
-"internal"` since VPN/DB access is available locally anyway -- switch to
-`"external"` only if running somewhere without VPN.
+`DATA_SOURCE` in `01_fit_bss_bias.R` therefore **defaults to `"external"`**.
+That is a deliberate choice, not a fallback: it makes the entire analysis
+reproducible from this repo plus plain internet access, with no VPN and no
+WDFW database credentials. Meeting participants (DFW and tribal technical
+staff) can clone the branch and re-run every step start to finish and get
+the same numbers -- the difference between sharing results and sharing an
+analysis. `"internal"` stays available for DB-only needs.
 
 ## Same-day feasibility -- read this before starting a full historical run
 

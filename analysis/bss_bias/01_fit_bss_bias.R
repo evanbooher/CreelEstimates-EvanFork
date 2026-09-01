@@ -41,10 +41,11 @@
 #       README.md's "What 'the bias term' is") -- irrelevant to this
 #       analysis's identification of `b` either way.
 #
-#       So DATA_SOURCE <- "external" below is a viable VPN-free option. This
-#       run used DATA_SOURCE <- "internal" anyway (VPN/DB already available
-#       locally) -- purely a convenience choice, not a fallback from a failed
-#       "external" check.
+#       DATA_SOURCE below therefore DEFAULTS TO "external": the whole
+#       analysis is reproducible from the repo + plain internet, so meeting
+#       participants (DFW + tribal technical staff) can re-run it start to
+#       finish themselves rather than taking the outputs on faith. "internal"
+#       remains available for DB-only needs.
 #
 # [0.B] Time ONE fishery-year end to end at the "smoke" config (see
 #       FIT_CONFIGS below) before committing to a full run. If it takes materially
@@ -104,7 +105,14 @@ dir.create(DRAWS_DIR, recursive = TRUE, showWarnings = FALSE)
 # Configuration -- read this before running
 # ------------------------------------------------------------------------------
 
-DATA_SOURCE <- "internal"  # <-- change per the 0.A check above if a public path works
+# DEFAULTS TO "external" (data.wa.gov) ON PURPOSE, not "internal": it makes
+# this entire analysis reproducible by anyone with the repo and plain
+# internet access -- no VPN, no WDFW DB credentials. Meeting participants
+# (DFW + tribal technical staff) can re-run start to finish and get the same
+# numbers, which is the difference between "here are my results" and "here
+# is the analysis." Verified equivalent for BSS input purposes in check 0.A
+# above. Switch to "internal" only if you specifically need DB-only data.
+DATA_SOURCE <- "external"
 
 # creelutils::fetch_data()'s documented conn = NULL auto-connect-when-internal
 # path does not work against the currently installed creelutils version --
