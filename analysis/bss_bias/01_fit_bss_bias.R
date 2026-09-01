@@ -333,7 +333,20 @@ safe_name <- function(x) stringr::str_replace_all(x, "[^[:alnum:]]", "_")
 # bias_summary, na_drop_log all do).
 append_csv_row <- function(row_df, path) {
   if (file.exists(path)) {
-    existing <- readr::read_csv(path, show_col_types = FALSE) |>
+    # Force the re-read to use row_df's ACTUAL column types rather than
+    # read_csv()'s own guess from the file's text. Columns built via
+    # paste(..., collapse = "|") (crc_areas, section_nums, ...) are always
+    # character in row_df, but read back as <double> if every row written so
+    # far happened to be a single numeric-looking value with no "|" -- the
+    # guess depends on what's already on disk, not on the column's real type,
+    # and bind_rows() then errors on the mismatch the moment a row needs the
+    # character form. Unlisted columns (schema drift) still fall back to
+    # col_guess() via cols()'s default.
+    col_types <- do.call(readr::cols, imap(row_df, ~ if (inherits(.x, "Date")) readr::col_date()
+      else if (is.character(.x)) readr::col_character()
+      else if (is.logical(.x)) readr::col_logical()
+      else readr::col_double()))
+    existing <- readr::read_csv(path, col_types = col_types) |>
       dplyr::filter(!(fishery_name %in% row_df$fishery_name))
     readr::write_csv(dplyr::bind_rows(existing, row_df), path)
   } else {
