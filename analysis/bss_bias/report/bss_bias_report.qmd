@@ -95,6 +95,50 @@ Snohomish and Stillaguamish fall salmon fisheries. So:
 
 That second case is what §5 and §6 set up.
 
+### What `b` actually is
+
+The model predicts how many vehicles the index count *should* see, from two
+things it estimates separately:
+
+- **angler effort** — how many anglers were present in that section at that
+  count, scaled by how much of the section the count covers (`p_TI`)
+- **vehicles per angler** (`R_V`) — estimated from the interviews, where each
+  interviewed group reports how many anglers it had (`A_A`) and how many
+  vehicles it brought (`V_A`)
+
+`b` is the multiplier between that prediction and what the count actually
+recorded:
+
+$$
+b_1 \;=\; \frac{\text{vehicles actually counted}}{\text{anglers present} \;\times\; \text{section coverage} \;\times\; \text{vehicles per angler}}
+$$
+
+So `b = 1` means the index count is exactly what angler effort and the
+interviews say it should be. `b[2]` is the same quantity for trailer counts,
+using trailers per angler (`R_T`).
+
+| `b` | What it says | Examples |
+|---|---|---|
+| **above 1** | The count sees **more** vehicles than the anglers account for | Non-angler vehicles inside the counted area: day-use visitors, hikers, swimmers, non-fishing boaters, shared trailhead or boat-launch lots. Vehicles belonging to anglers who fished outside the count window but whose car is still parked. Overnight or multi-day vehicles. The same vehicle counted in two sections or on two passes. |
+| **below 1** | The count sees **fewer** vehicles than the anglers account for | Anglers parking outside the count route: roadside pullouts, private drives, neighborhoods, walk-in access. Anglers dropped off, or arriving by boat from a launch outside the section. Parking areas the route misses. Counts timed away from peak vehicle presence. |
+
+Note that `b` is **not** "anglers per vehicle" — that is `R_V`, and it is
+estimated separately. `b` is only the leftover discrepancy after `R_V` has
+been accounted for.
+
+::: {.callout-note}
+## Why `b` needs interviews to exist at all
+`b` and `R_V` both multiply angler effort in the same count likelihood, so from
+the counts alone they cannot be told apart — any count is equally well explained
+by "more vehicles per angler" or "a biased count". The interviews are what pin
+`R_V` down independently (`V_A ~ Binomial(A_A, R_V)`), which is what leaves `b`
+free to absorb the remaining discrepancy.
+
+A fishery-year with few vehicle-count interviews therefore has little
+separating the two, and `b` falls back toward its prior. That is exactly what
+the `prior_contraction` column reports.
+:::
+
 ## How to read this
 
 ```{r}
