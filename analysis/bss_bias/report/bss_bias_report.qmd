@@ -79,13 +79,14 @@ toy_recovery <- read_out("bss_b_toy_recovery.csv")
 Freshwater creel estimates from the Bayesian State-Space (BSS) model include an
 **effort-index bias term `b`**: `b[1]` scales the vehicle index count, `b[2]`
 the trailer index count. A prior of `lognormal(0, sigma)` puts its median at
-1 -- "the index count means what we think it means".
+1. 
 
 `b` is only identified when a fishery-year has **census (tie-in) counts**
-alongside its index counts. Without them the posterior simply reproduces the
-prior. That is an assumption, not an estimate.
+alongside its index counts. Without census count data the posterior simply reproduces the
+prior, as an assumption, not an estimate.
 
-We expect fishery-years where census data is unavailable. So:
+We expect fishery-years where census data is unavailable, with an immediate resource challenge for 
+Snohomish and Stillguamish fall salmon fisheries. So:
 
 > **First-order question: how variable is `b` across years, rivers and
 > fisheries?** If it is stable, historical estimates transfer to a year we
@@ -93,15 +94,6 @@ We expect fishery-years where census data is unavailable. So:
 > defensible way to construct a predictive distribution instead.
 
 That second case is what §5 and §6 set up.
-
-::: {.callout-important}
-## `b` is not `p_TI`
-`b` (this analysis) is the **effort-index bias term**. `p_TI` / `TI_expan` is
-the **census:index spatial-coverage ratio** -- a different parameter that sits
-adjacent in the same likelihood, and which some code comments confusingly also
-call "the bias parameter". `p_TI` appears here only because a year-to-year
-change in it would distort `b`; it is not the thing being compared.
-:::
 
 ## How to read this
 
@@ -177,9 +169,9 @@ Every `b` estimate in hand, by likelihood type, river and year.
 ::: {.callout-warning}
 ## Read `prior_contraction` before quoting a number
 Prior contraction near 0 means the posterior barely moved off its prior -- the
-estimate reflects the assumption, not the data. **This matters most for
-`b[2]`**: a fishery-year with no trailer index counts still produces a `b[2]`
-posterior. Low variance across such years is the prior talking, not a stable
+estimate reflects the assumption, not the data. This matters more for
+`b[2]` than `b[1]`. A fishery-year with no trailer index counts still produces a `b[2]`
+posterior, but low variance across such years is the prior talking, not a stable
 bias term.
 :::
 
@@ -242,8 +234,8 @@ if (is.null(fig_path("fig3_posterior_densities"))) missing_note("analysis/bss_bi
 ### How much of that is real?
 
 The spread of the point estimates mixes two things: genuine year-to-year
-movement in `b`, and uncertainty in measuring each year. **τ² separates them**
--- it is the variance remaining after each estimate's own uncertainty is
+movement in `b`, and uncertainty in measuring each year. **τ² separates them**, 
+it is the variance remaining after each estimate's own uncertainty is
 accounted for. That is why this uses a random-effects fit rather than the
 standard deviation of the point estimates, which would overstate the real
 variability.
@@ -274,8 +266,8 @@ if (!is.null(T2)) {
 ## CI vs PI
 **CI** is the interval on the *mean of past years*. **PI** is where a *new*
 year is expected to fall, and is wider by construction. The PI is the one that
-answers "what do we use for a year we cannot measure" -- quoting the CI in its
-place would understate uncertainty substantially.
+answers "what do we use for a year we cannot measure", as quoting the CI in its
+place would understate uncertainty.
 
 `tau2 (informed only)` recomputes τ² over data-informed estimates alone. If it
 is much larger than `tau`², the apparent stability came from prior-dominated
@@ -285,9 +277,7 @@ years sitting near `b = 1`.
 ## 3. Pink-year effect
 
 Puget Sound pink salmon return in **odd** years, bringing large effort influxes
-that plausibly shift the vehicle:angler relationship. Multi-season fisheries
-(e.g. "2022-23") take the parity of their **fall run year** -- `2022-23` is a
-fall-2022 fishery, so it counts as even.
+that plausibly shift the vehicle:angler relationship.
 
 ```{r}
 #| results: asis
@@ -318,7 +308,7 @@ if (!is.null(T3)) {
 ::: {.callout-warning}
 ## How much can this contrast actually carry?
 The pink effect is estimated from a handful of odd years against a handful of
-even ones. Treat a wide CI as what it is -- the design has limited power, not
+even ones. Treat a wide CI as what it is, where the design has limited power, not
 evidence of no effect. It is a hypothesis worth carrying into the predictive
 model, not a settled coefficient.
 :::
@@ -516,3 +506,11 @@ Rscript analysis/bss_bias/05_predictive_toy.R
 Rscript analysis/bss_bias/06_variability_analysis.R
 quarto render analysis/bss_bias/report/bss_bias_report.qmd
 ```
+
+### `b` is not `p_TI`in CreelEstimates code 
+`b` (this analysis) is the **effort-index bias term**. `p_TI` / `TI_expan` is
+the **census:index spatial-coverage ratio** -- a different parameter that sits
+adjacent in the same likelihood, and which some code comments confusingly also
+call "the bias parameter". `p_TI` appears here only because a year-to-year
+change in it would distort `b`; it is not the thing being compared.
+
