@@ -199,10 +199,6 @@ DAY_LENGTH                <- "night closure"
 PERIOD_PE                 <- "week"   # for prep_days()'s PE-style period column (unused by BSS itself)
 PERIOD_BSS                <- "day"    # what actually indexes the BSS model; see prep_inputs_bss(period=)
 
-SALMON_SPECIES     <- c("Chinook", "Coho", "Chum", "Pink", "Sockeye")
-HARVEST_FATE        <- "Kept|Released"  # BSS catch (`c`) is total encounters, not harvest-only -- broader than the PST harvest scope on purpose
-EXCLUDE_LIFE_STAGES <- c("Smolt")
-
 # ------------------------------------------------------------------------------
 # Skip/error machinery -- transcribed from analysis/pst/02_ingest/
 # multi_fishery_creel_summary.R on chore/multi-fishery-trip-summary (read-only
@@ -356,73 +352,38 @@ append_csv_row <- function(row_df, path) {
 
 # ------------------------------------------------------------------------------
 # Catch-group selection rule (see README.md): `b` is fit ONCE per fishery-year
-# against the pooled TOTAL SALMON catch group -- all SALMON_SPECIES combined,
-# not any single species and not a "most distinct interviewed groups"
-# heuristic. This mirrors build_est_catch_groups()'s total_group /
-# TOTAL_LABEL convention on chore/multi-fishery-trip-summary's
-# multi_fishery_creel_summary.R, and for the same reason given there ([N1]):
-# species co-occur within interviews, so pooling must happen at the
-# per-interview level BEFORE the CPUE/likelihood calculation, not by summing
-# species-level results afterward -- summing would ignore covariance. Species/
-# life-stage/fin-mark alternations are built from OBSERVED values per fishery.
-# This need not match PST harvest scope exactly since `c`/`h` here just need
-# to be a reasonable, consistently-applied catch definition, not a harvest
-# total. The chosen est_cg string is recorded in every output row.
+# against a FIXED target catch group keyed off the fishery name -- not pooled
+# total salmon, not derived from observed species in the data. Per explicit
+# direction:
+#   name contains "Chinook"                    -> Chinook_Adult_AD_Kept
+#   name contains "fall salmon", or Stillaguamish (any "salmon and gamefish"
+#     naming, which never contains "fall salmon" literally) -> Coho_Adult_AD|UM_Kept
+#   name contains "sockeye"                     -> Sockeye_Adult_AD|UM_Kept
+# Checked in that order (no observed overlap among current fishery names, but
+# order still matters if that changes). Fate is HARVEST ONLY ("Kept") for
+# every rule -- a deliberate narrowing from the earlier pooled-total design,
+# which used "Kept|Released" on the reasoning that BSS catch is total
+# encounters. Any fishery name matching none of these hard-stops rather than
+# silently getting no group -- surfacing a naming gap immediately instead of
+# a downstream skip with a confusing reason.
 # ------------------------------------------------------------------------------
 
-build_catch_groups <- function(dwg_catch, fishery_name) {
-  cat_std <- dwg_catch |>
-    mutate(across(c(species, life_stage, fin_mark, fate), ~ replace_na(as.character(.), "NA")))
-
-  spp_present <- sort(intersect(unique(cat_std$species), SALMON_SPECIES))
-  if (length(spp_present) == 0) {
-    skip_fishery(paste0("No PST salmon species in catch records. Species present: ",
-                         paste(sort(unique(cat_std$species)), collapse = ", ")), stage = "catch_groups")
+fishery_target_catch_group <- function(fishery_name) {
+  if (str_detect(fishery_name, regex("Chinook", ignore_case = TRUE))) {
+    return(list(species = "Chinook", life_stage = "Adult", fin_mark = "AD", fate = "Kept"))
   }
-
-  harvest_rows <- cat_std |> filter(species %in% spp_present, str_detect(fate, HARVEST_FATE))
-  if (nrow(harvest_rows) == 0) {
-    skip_fishery("Salmon present but no records matching the fate scope.", stage = "catch_groups")
+  if (str_detect(fishery_name, regex("fall salmon", ignore_case = TRUE)) ||
+      str_detect(fishery_name, regex("Stillaguamish", ignore_case = TRUE))) {
+    return(list(species = "Coho", life_stage = "Adult", fin_mark = "AD|UM", fate = "Kept"))
   }
-
-  ls_vals <- setdiff(sort(unique(harvest_rows$life_stage)), EXCLUDE_LIFE_STAGES)
-  if (length(ls_vals) == 0) skip_fishery("Every record is an excluded life stage.", stage = "catch_groups")
-  fm_vals <- sort(unique(harvest_rows$fin_mark[harvest_rows$life_stage %in% ls_vals]))
-
-  bad <- c(spp_present, ls_vals, fm_vals) |> keep(~ str_detect(.x, "[.\\\\+*?\\[\\]^$(){}=!<>|:-]"))
-  if (length(bad) > 0) {
-    cli::cli_abort("Category value(s) contain regex metacharacters, cannot safely build a catch-group pattern: {.val {bad}}")
+  if (str_detect(fishery_name, regex("sockeye", ignore_case = TRUE))) {
+    return(list(species = "Sockeye", life_stage = "Adult", fin_mark = "AD|UM", fate = "Kept"))
   }
-
-  species_groups <- tibble(species = spp_present, life_stage = paste(ls_vals, collapse = "|"),
-                            fin_mark = paste(fm_vals, collapse = "|"), fate = HARVEST_FATE)
-  total_group <- tibble(species = paste(spp_present, collapse = "|"), life_stage = paste(ls_vals, collapse = "|"),
-                         fin_mark = paste(fm_vals, collapse = "|"), fate = HARVEST_FATE)
-
-  # When only one species is present (e.g. "Skagit spring Chinook", "Skagit
-  # summer sockeye"), paste(spp_present, collapse="|") on a single element
-  # just returns that element -- total_group becomes BYTE-IDENTICAL to
-  # species_groups' sole row, same reconstructed est_cg string. Binding both
-  # would give prep_dwg_interview_catch() two replicate sets tagged with the
-  # same est_cg label; filtering to it then returns both combined, doubling
-  # the interview count (the "dims declared vs found" Stan crash). For a
-  # single-species fishery, that lone species group already IS the total.
-  if (length(spp_present) > 1) {
-    bind_rows(species_groups, total_group) |> as.data.frame(stringsAsFactors = FALSE)
-  } else {
-    as.data.frame(species_groups, stringsAsFactors = FALSE)
-  }
-}
-
-# Reconstructs the est_cg string EXACTLY as prep_dwg_interview_catch() builds
-# it (paste0(unlist(one row of species/life_stage/fin_mark/fate), collapse =
-# "_")) for the pooled total-salmon row specifically -- always the LAST row
-# of build_catch_groups()'s output, since total_group is bound after
-# species_groups. Deterministic: no dependence on which group happens to have
-# the most interviews.
-total_salmon_est_cg <- function(catch_groups) {
-  total_row <- catch_groups[nrow(catch_groups), , drop = FALSE]
-  paste0(c(total_row$species, total_row$life_stage, total_row$fin_mark, total_row$fate), collapse = "_")
+  cli::cli_abort(
+    "No target-catch-group rule matches fishery name {.val {fishery_name}} -- \\
+     checked for \"Chinook\", \"fall salmon\"/\"Stillaguamish\", \"sockeye\". \\
+     Add a rule for this fishery before running it, rather than guessing."
+  )
 }
 
 # ------------------------------------------------------------------------------
@@ -478,18 +439,20 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME) {
                                      angler_type_kayak_pontoon = ANGLER_TYPE_KAYAK_PONTOON)
   })
 
-  catch_groups <- run_stage("catch_groups", build_catch_groups(dwg$catch, fishery_name))
+  target_group <- run_stage("catch_groups", fishery_target_catch_group(fishery_name))
+  catch_groups <- as.data.frame(target_group, stringsAsFactors = FALSE)
 
   interview_plus_catch <- run_stage("interview_catch", {
     prep_dwg_interview_catch(params = params, interview_plus_angler_types = interview_angler_types,
                               dwg_catch = dwg$catch, study_design = study_design, est_catch_groups = catch_groups)
   })
 
-  chosen_ecg <- run_stage("choose_ecg", total_salmon_est_cg(catch_groups))
+  chosen_ecg <- paste0(c(target_group$species, target_group$life_stage, target_group$fin_mark, target_group$fate),
+                        collapse = "_")
   if (!chosen_ecg %in% interview_plus_catch$est_cg) {
-    skip_fishery(paste0("Reconstructed total-salmon est_cg ('", chosen_ecg, "') does not match ",
-                         "any est_cg actually produced by prep_dwg_interview_catch() -- catch-group ",
-                         "string construction mismatch, not a data problem."), stage = "choose_ecg")
+    skip_fishery(paste0("Target catch group ('", chosen_ecg, "') has no matching records for '",
+                         fishery_name, "' -- check species/fin_mark/fate assumptions for this fishery."),
+                 stage = "choose_ecg")
   }
 
   effort_index_summ <- run_stage("effort_index", {

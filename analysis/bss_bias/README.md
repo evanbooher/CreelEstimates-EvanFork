@@ -62,21 +62,29 @@ would make the whole comparison meaningless.
 
 ## Catch-group selection
 
-`b` is fit once per fishery-year, against a single catch group: the pooled
-**total salmon** group (all `SALMON_SPECIES` combined), not any single
-species and not a "most distinct interviewed groups" heuristic. This mirrors
-`build_est_catch_groups()`'s `total_group`/`TOTAL_LABEL` convention on
-`chore/multi-fishery-trip-summary`'s `multi_fishery_creel_summary.R`, and for
-the same reason given there: species co-occur within interviews, so pooling
-has to happen at the per-interview level before the CPUE/likelihood
-calculation -- summing species-level results afterward would ignore
-covariance. `total_salmon_est_cg()` in `01_fit_bss_bias.R` reconstructs the
-pooled group's `est_cg` string deterministically (no dependence on which
-group happens to have the most interviews). This matters for `b`
-specifically (not just for catch) because the interview rows feeding
-`IntA`/`V_A`/`T_A` are filtered by `est_cg` upstream of `prep_inputs_bss()`.
-The chosen `est_cg` string is recorded in every output row (`chosen_est_cg` /
-`est_cg` columns).
+`b` is fit once per fishery-year, against a **fixed target catch group keyed
+off the fishery name** -- not pooled total salmon, not derived from observed
+species in the data. Per explicit direction, `fishery_target_catch_group()`
+in `01_fit_bss_bias.R` applies, in order:
+
+| Fishery name contains | Target catch group (`est_cg`) |
+|---|---|
+| `Chinook` | `Chinook_Adult_AD_Kept` |
+| `fall salmon`, or basin = Stillaguamish (its "salmon and gamefish" naming never contains "fall salmon" literally) | `Coho_Adult_AD\|UM_Kept` |
+| `sockeye` | `Sockeye_Adult_AD\|UM_Kept` |
+
+Fate is **harvest only** (`Kept`) for every rule -- a deliberate narrowing
+from an earlier pooled-total design that used `Kept|Released` on the
+reasoning that BSS catch is total encounters, not harvest. Chinook is
+`AD`-only (hatchery-marked) while Coho/Sockeye are `AD|UM` (both marks) --
+intentional given wild/unmarked Chinook are typically release-only under
+regulation in these fisheries. A fishery name matching none of these rules
+hard-stops the whole run (`cli_abort`, not a per-fishery skip) rather than
+silently proceeding with no catch group -- surfacing a naming gap
+immediately. This matters for `b` specifically (not just for catch) because
+the interview rows feeding `IntA`/`V_A`/`T_A` are filtered by `est_cg`
+upstream of `prep_inputs_bss()`. The chosen `est_cg` string is recorded in
+every output row (`chosen_est_cg` / `est_cg` columns).
 
 ## Pipeline
 
