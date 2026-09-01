@@ -62,6 +62,8 @@
 #   bss_b_summary.csv            -- one/two rows (b[1], b[2]) per fishery-year that fit
 #   bss_b_run_ledger.csv         -- one row per attempted fishery-year: status/stage/reason
 #   bss_b_stan_dims.csv          -- D,G,S,H,V_n,T_n,A_n,E_n,IntC,IntA per fishery-year
+#   bss_b_na_drops.csv           -- per fishery-year x group, NA rows dropped before Stan
+#                                    (n_before/n_dropped/n_after; see R_functions/drop_na_bss_inputs.R)
 #   b_draws/<safe_name>.rds      -- raw b[1]/b[2] posterior draws (small; kept for Phase 5)
 #   fits/<safe_name>.rds         -- full stanfit object, ONLY if SAVE_FITS == TRUE (large)
 # ==============================================================================
@@ -513,6 +515,10 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME) {
   # isn't safe to drop) BEFORE the preflight checks below, so V_n/IntA/etc.
   # reflect the post-drop counts.
   inputs_bss <- run_stage("drop_na_bss_inputs", drop_na_bss_inputs(inputs_bss, fishery_name = fishery_name))
+  na_drop_log <- attr(inputs_bss, "na_drop_log")
+  if (!is.null(na_drop_log) && nrow(na_drop_log) > 0) {
+    append_csv_row(na_drop_log, file.path(OUT_DIR, "bss_b_na_drops.csv"))
+  }
 
   # BSS-specific preflight: converts a cryptic Stan crash into a ledger row.
   if (inputs_bss$G < 2) skip_fishery("Only one angler type; b[2]/lambda[...,2] out of bounds in the BSS likelihood.", stage = "bss_preflight")

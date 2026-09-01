@@ -186,6 +186,7 @@ with numbers backfilled at production fit quality afterward.**
 | Reused unchanged | `resolve_dates.R`, `prep_days.R`, `prep_dwg_interview_fishing_time.R`, `prep_dwg_interview_angler_types.R`, `prep_dwg_interview_catch.R`, `prep_dwg_effort_index.R`, `prep_dwg_effort_census.R`, `prep_dwg_census_expan.R`, `prep_inputs_bss.R` |
 | Reused, one additive change | `fit_bss.R` -- added `pars`/`include` args, forwarded to `stan()` (restricts monitored parameters; the main speed/memory lever available without touching chains/iter) |
 | Net-new function | `R_functions/get_bss_bias.R` -- extracts `b[1]`/`b[2]` posterior summaries from a stanfit |
+| Net-new function | `R_functions/drop_na_bss_inputs.R` -- drops NA rows from prep_inputs_bss()'s observation-level Stan inputs before fitting (Stan hard-errors on any NA in `data`); logs what it dropped per fishery-year to `bss_b_na_drops.csv` |
 | Net-new scripts | everything in `analysis/bss_bias/` |
 | Transcribed patterns (not imports) | `skip_fishery()`/`run_stage()` condition-class error handling, the run ledger, `resolve_study_design()`, `preflight_fishery()` -- from `chore/multi-fishery-trip-summary`'s `multi_fishery_creel_summary.R`, read-only reference |
 | Explicitly deferred | (d2), an in-model hierarchical re-specification of `b` itself across years -- flagged as a principled follow-on, not attempted here |

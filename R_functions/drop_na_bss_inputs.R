@@ -14,6 +14,11 @@
 # via day_V/day_T/.../day_IntA, so silently dropping a day would corrupt
 # every other group's day index. NA there is a different, deeper data
 # problem -- this skips the fishery-year loudly instead of masking it.
+#
+# The returned list carries a `na_drop_log` attribute -- a tibble, one row
+# per group present in this fishery-year's inputs (n_dropped may be 0) --
+# so callers can write a persistent audit record rather than relying on the
+# console warnings alone. See its use in 01_fit_bss_bias.R.
 drop_na_bss_inputs <- function(inputs_bss, fishery_name = NA_character_) {
 
   groups <- list(
@@ -25,22 +30,35 @@ drop_na_bss_inputs <- function(inputs_bss, fishery_name = NA_character_) {
     list(n = "IntA", vars = c("day_IntA", "gear_IntA", "section_IntA", "V_A", "T_A", "A_A"))
   )
 
+  drop_log <- tibble::tibble(
+    fishery_name = character(), group = character(), vars = character(),
+    n_before = integer(), n_dropped = integer(), n_after = integer()
+  )
+
   for (g in groups) {
     present_vars <- intersect(g$vars, names(inputs_bss))
     if (length(present_vars) == 0) next
 
+    n_before <- inputs_bss[[g$n]]
     na_mask <- Reduce(`|`, lapply(present_vars, function(v) is.na(inputs_bss[[v]])))
     n_bad <- sum(na_mask)
-    if (n_bad == 0) next
 
-    cli::cli_alert_warning(
-      "  {.val {fishery_name}}: dropping {n_bad} NA row(s) from {.val {g$n}} \\
-       ({paste(present_vars, collapse=', ')}) before Stan -- {inputs_bss[[g$n]]} -> \\
-       {inputs_bss[[g$n]] - n_bad}."
-    )
-    for (v in present_vars) inputs_bss[[v]] <- inputs_bss[[v]][!na_mask]
-    inputs_bss[[g$n]] <- inputs_bss[[g$n]] - n_bad
+    if (n_bad > 0) {
+      cli::cli_alert_warning(
+        "  {.val {fishery_name}}: dropping {n_bad} NA row(s) from {.val {g$n}} \\
+         ({paste(present_vars, collapse=', ')}) before Stan -- {n_before} -> {n_before - n_bad}."
+      )
+      for (v in present_vars) inputs_bss[[v]] <- inputs_bss[[v]][!na_mask]
+      inputs_bss[[g$n]] <- inputs_bss[[g$n]] - n_bad
+    }
+
+    drop_log <- dplyr::bind_rows(drop_log, tibble::tibble(
+      fishery_name = fishery_name, group = g$n, vars = paste(present_vars, collapse = "|"),
+      n_before = n_before, n_dropped = n_bad, n_after = n_before - n_bad
+    ))
   }
+
+  attr(inputs_bss, "na_drop_log") <- drop_log
 
   day_level <- intersect(c("w", "period", "L"), names(inputs_bss))
   bad_day <- day_level[vapply(day_level, function(v) any(is.na(inputs_bss[[v]])), logical(1))]
