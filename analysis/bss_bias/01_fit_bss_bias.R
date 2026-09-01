@@ -619,6 +619,11 @@ target_fisheries <- read_csv(discovery_path, show_col_types = FALSE) |>
   pull(fishery_name_raw) |>
   unique()
 
+# TEMPORARY -- testing the single-species catch-group fix directly against
+# "Skagit spring Chinook 2022 lower" instead of waiting for the full queue.
+# REVERT this line (delete it) once troubleshooting is done.
+target_fisheries <- "Skagit spring Chinook 2022 lower"
+
 cli::cli_alert_info("{length(target_fisheries)} fishery-year(s) queued at fit_config = {.val {FIT_CONFIG_NAME}}.")
 
 run_ledger <- map(target_fisheries, function(fn) {
