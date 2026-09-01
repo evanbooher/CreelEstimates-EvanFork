@@ -1,6 +1,6 @@
 ---
 title: "BSS effort-bias term (`b`): interannual variability and a predictive approach"
-subtitle: "Skagit, Snohomish and Stillaguamish -- DFW/tribal technical staff working session"
+subtitle: "DFW/tribal technical staff working session"
 date: last-modified
 execute:
   warning: false
