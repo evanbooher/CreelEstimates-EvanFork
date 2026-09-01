@@ -2,7 +2,8 @@
 # 04_candidate_options.R
 #
 # Purpose:
-#   Compute, per fishery-series (basin x fishery_label) and separately for
+#   Compute, per fishery-series (basin x fishery_type -- the fishery name
+#   WITHOUT its year, so all years of one fishery form a series) and separately for
 #   b[1] (vehicle) and b[2] (trailer), the four candidate bias-correction
 #   options the meeting needs to choose between:
 #     (a) time-series mean
@@ -48,7 +49,7 @@ b_summary <- read_csv(summary_path, show_col_types = FALSE)
 comp      <- read_csv(comp_path, show_col_types = FALSE)
 
 dat <- b_summary |>
-  left_join(comp |> select(fishery_name, basin, fishery_label, year_start, comparability_tier),
+  left_join(comp |> select(fishery_name, basin, fishery_type, year_start, comparability_tier),
             by = "fishery_name") |>
   filter(comparability_tier %in% INCLUDED_TIERS, informed_flag != "unconverged") |>
   mutate(
@@ -150,13 +151,13 @@ compute_options_for_series <- function(df_series) {
 }
 
 candidate_options <- dat |>
-  group_by(basin, fishery_label, bias_type) |>
+  group_by(basin, fishery_type, bias_type) |>
   group_modify(~ compute_options_for_series(.x)) |>
   ungroup()
 
 write_csv(candidate_options, file.path(OUT_DIR, "bss_b_candidate_options.csv"))
 cli::cli_alert_success("Wrote {nrow(candidate_options)} rows to bss_b_candidate_options.csv")
-candidate_options |> filter(bias_type == "vehicle") |> select(basin, fishery_label, option, estimate, lower, upper, n_years_used) |> print(n = 100)
+candidate_options |> filter(bias_type == "vehicle") |> select(basin, fishery_type, option, estimate, lower, upper, n_years_used) |> print(n = 100)
 
 # ------------------------------------------------------------------------------
 # gt render (vehicle bias only, the headline parameter)
@@ -165,8 +166,8 @@ candidate_options |> filter(bias_type == "vehicle") |> select(basin, fishery_lab
 gt_tbl <- candidate_options |>
   filter(bias_type == "vehicle") |>
   mutate(across(c(estimate, lower, upper), ~ round(.x, 3))) |>
-  select(basin, fishery_label, option, estimate, lower, upper, n_years_used, notes) |>
-  gt(groupname_col = "basin", rowname_col = "fishery_label") |>
+  select(basin, fishery_type, option, estimate, lower, upper, n_years_used, notes) |>
+  gt(groupname_col = "basin", rowname_col = "fishery_type") |>
   tab_header(title = "Candidate bias-correction options (b₁, vehicle)",
              subtitle = paste0("Included tiers: ", paste(INCLUDED_TIERS, collapse = ", "))) |>
   cols_label(option = "Option", estimate = "Estimate", lower = "Lower 95%", upper = "Upper 95%",

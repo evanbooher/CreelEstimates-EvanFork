@@ -94,7 +94,7 @@ build_bias_plot_df <- function(bias_type_val) {
   b_summary |>
     filter(bias_type == bias_type_val) |>
     left_join(
-      comp |> select(fishery_name, basin, fishery_label, season_label, year_start, comparability_tier),
+      comp |> select(fishery_name, basin, fishery_label, fishery_type, season_label, year_start, comparability_tier),
       by = "fishery_name"
     ) |>
     mutate(
@@ -114,8 +114,8 @@ if (nrow(plot_df) == 0) {
 # re-learn the color key. facet_wrap(~basin) already separates basins, so
 # Snohomish/Stillaguamish's single series each still reads unambiguously
 # despite not sharing one "neutral" color the way Skagit's four don't either.
-all_series    <- b_summary |> left_join(comp |> select(fishery_name, fishery_label), by = "fishery_name") |>
-  distinct(fishery_label) |> pull(fishery_label) |> sort()
+all_series    <- b_summary |> left_join(comp |> select(fishery_name, fishery_type), by = "fishery_name") |>
+  distinct(fishery_type) |> pull(fishery_type) |> sort()
 series_colors <- setNames(unname(CAT)[((seq_along(all_series) - 1) %% length(CAT)) + 1], all_series)
 
 # ------------------------------------------------------------------------------
@@ -125,12 +125,12 @@ series_colors <- setNames(unname(CAT)[((seq_along(all_series) - 1) %% length(CAT
 # ------------------------------------------------------------------------------
 
 make_b_series_fig <- function(plot_df, param_label, y_lab) {
-  ggplot(plot_df, aes(x = year_start, y = median, group = fishery_label, color = fishery_label)) +
+  ggplot(plot_df, aes(x = year_start, y = median, group = fishery_type, color = fishery_type)) +
     geom_hline(yintercept = 1, linetype = "dashed", color = INK_MUTED, linewidth = 0.4) +
     geom_segment(aes(xend = year_start, y = q2.5, yend = q97.5), linewidth = 0.5, alpha = 0.55, lineend = "round") +
     geom_segment(aes(xend = year_start, y = q10, yend = q90), linewidth = 1.4, lineend = "round") +
     geom_line(linewidth = 0.6, alpha = 0.7) +
-    geom_point(aes(shape = comparability_tier, fill = fishery_label), size = 3, stroke = 1) +
+    geom_point(aes(shape = comparability_tier, fill = fishery_type), size = 3, stroke = 1) +
     scale_color_manual(values = series_colors, name = "Fishery") +
     scale_fill_manual(values = series_colors, guide = "none") +
     scale_shape_manual(values = TIER_SHAPES, name = "Comparability tier") +
@@ -168,7 +168,7 @@ if (nrow(plot_df_trailer) == 0) {
 strip_df <- comp |>
   mutate(basin = factor(basin, levels = c("Skagit", "Snohomish", "Stillaguamish")))
 
-fig2 <- ggplot(strip_df, aes(x = year_start, y = fishery_label, fill = comparability_tier)) +
+fig2 <- ggplot(strip_df, aes(x = year_start, y = fishery_type, fill = comparability_tier)) +
   geom_tile(color = SURFACE, linewidth = 1) +
   scale_fill_manual(values = TIER_COLORS, name = "Comparability tier") +
   facet_grid(basin ~ ., scales = "free_y", space = "free_y") +
@@ -315,7 +315,7 @@ if (nrow(info_df) > 0) {
 options_path <- file.path(OUT_DIR, "bss_b_candidate_options.csv")
 if (file.exists(options_path)) {
   # NOTE: opts already carries its own `basin` column (from 04's
-  # group_by(basin, fishery_label, bias_type)) -- do NOT re-join `basin` from
+  # group_by(basin, fishery_type, bias_type)) -- do NOT re-join `basin` from
   # `comp` here, that would produce basin.x/basin.y and silently break
   # facet_wrap(~ basin)'s per-panel routing of these hlines (inherited from fig1).
   opts <- read_csv(options_path, show_col_types = FALSE) |>
