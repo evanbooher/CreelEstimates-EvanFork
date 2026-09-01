@@ -172,7 +172,7 @@ FIT_CONFIGS <- list(
   quick = list(n_chain = 2, n_cores = 2, n_iter = 600,  n_warmup = 300,  n_thin = 1, adapt_delta = 0.80, max_treedepth = 11),
   prod  = list(n_chain = 4, n_cores = 4, n_iter = 2000, n_warmup = 1000, n_thin = 1, adapt_delta = 0.95, max_treedepth = 13)
 )
-FIT_CONFIG_NAME <- "quick"   # <-- change to "smoke" for the first end-to-end test, "prod" for backfill later
+FIT_CONFIG_NAME <- "smoke"   # <-- default is the fast/throwaway config; change to "quick" once smoke passes, "prod" for backfill later
 
 SAVE_FITS <- FALSE   # TRUE keeps the full stanfit per fishery-year (large!); the small
                       # b-summary + draws are the actual deliverable and are always saved.
