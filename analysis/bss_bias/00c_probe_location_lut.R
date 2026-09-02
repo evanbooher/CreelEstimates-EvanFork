@@ -141,10 +141,19 @@ candidates <- all_columns |>
     has_fishery  = nzchar(fishery_cols),
     has_section  = nzchar(section_cols),
     has_location = nzchar(location_cols),
+    # A usable KEY, not just a fishery-shaped column. creel.fishery_location_lut
+    # and creel.vw_fishery_location both match on "fishery", but only the view
+    # carries fishery_name -- the raw table keys on fishery_id and would need a
+    # join before it could be filtered to this analysis's fishery-years. The
+    # capture below filters by name, so a table without one is second-best by
+    # construction.
+    has_name_key = map_lgl(str_split(all_cols, fixed("|")),
+                           ~ any(tolower(.x) == "fishery_name")),
     # Name is a tiebreaker, not the test: a table can be the right one without
     # "lut" anywhere in its name, and a table named "..._lut" can be unrelated.
     name_hint    = str_detect(table_name, regex("lut|lookup|location", ignore_case = TRUE)),
-    score        = 2L * has_fishery + 2L * has_section + has_location + name_hint
+    score        = 2L * has_fishery + 2L * has_section + 2L * has_name_key +
+                   has_location + name_hint
   ) |>
   filter(has_fishery, has_section | has_location) |>
   arrange(desc(score), table_name)
@@ -158,7 +167,9 @@ if (nrow(candidates) == 0) {
     "i" = "Read {.file {file.path(OUT_DIR, 'location_lut_candidates.csv')}} and set LUT_TABLE by hand."
   ))
 }
-candidates |> select(table_schema, table_name, score, fishery_cols, section_cols, location_cols) |> print(n = 30)
+candidates |>
+  select(table_schema, table_name, score, has_name_key, fishery_cols, section_cols, location_cols) |>
+  print(n = 30)
 
 # Resolve whatever was chosen -- a hand-set LUT_TABLE or the top-scoring
 # candidate -- back to the schema and exact spelling the database reports.
