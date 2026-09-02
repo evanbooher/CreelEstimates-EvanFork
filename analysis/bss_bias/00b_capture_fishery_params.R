@@ -130,7 +130,15 @@ captured <- map(target_fisheries, function(fn) {
 # Preserve any previously-captured fisheries that are not in this run's target
 # set, so a scope change tops the file up instead of truncating it.
 if (file.exists(LOOKUP_PATH)) {
-  prior <- read_csv(LOOKUP_PATH, show_col_types = FALSE) |>
+  # Explicit col_types, not read_csv()'s guess. The dates are stored as TEXT on
+  # purpose (as.character() above) so the CSV round-trips without a timezone or
+  # format surprise -- but readr sees "2024-09-01" and guesses <date>, which
+  # then fails to bind_rows() against the <character> column in `captured`.
+  # What the column parses as must not depend on what happens to be on disk.
+  prior <- read_csv(
+    LOOKUP_PATH,
+    col_types = cols(.default = col_character(), n_days_window = col_integer())
+  ) |>
     filter(!fishery_name %in% captured$fishery_name)
   n_kept <- nrow(prior)
   if (n_kept > 0) cli::cli_alert_info("Preserving {n_kept} previously-captured fishery-year(s) not in this run.")
