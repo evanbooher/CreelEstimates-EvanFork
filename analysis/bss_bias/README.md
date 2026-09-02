@@ -116,6 +116,21 @@ Run in order:
    different days comparable -- something the live lookup cannot guarantee,
    VPN or not.
 
+1c. **`00c_probe_location_lut.R`** -- **VPN required; run once, commit the
+   result. Participants do not run this.** Finds the fishery/location lookup
+   table in the internal database and captures the rows for the target
+   fishery-years into `lookup/fishery_location_lut.csv`, so the "what changed
+   about this fishery's location definition across years" comparison runs on
+   the no-VPN path like everything else.
+
+   It probes rather than hard-coding a table name: `fishery_location_lut` is
+   referenced nowhere in this repo and `creelutils` exposes no accessor for
+   it, so the script searches `information_schema` for tables whose *column
+   signature* fits (something fishery-shaped plus something section- or
+   location-shaped), scores them, and stops with the evidence printed rather
+   than guessing when the top candidates tie. Set `LUT_TABLE` at the top to
+   skip the search once the table is known.
+
 2. **`01_fit_bss_bias.R`** -- the main driver. For each included
    fishery-year: fetch data, prep BSS inputs, fit the Stan model, extract
    `b`. Writes a **comparability row per fishery-year BEFORE fitting**, so
