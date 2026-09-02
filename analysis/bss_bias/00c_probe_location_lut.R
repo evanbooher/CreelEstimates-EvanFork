@@ -154,10 +154,47 @@ if (nrow(candidates) == 0) {
 }
 candidates |> select(table_schema, table_name, score, fishery_cols, section_cols, location_cols) |> print(n = 30)
 
-chosen <- if (!is.null(LUT_TABLE)) {
-  LUT_TABLE
+# Resolve whatever was chosen -- a hand-set LUT_TABLE or the top-scoring
+# candidate -- back to the schema and exact spelling the database reports.
+#
+# This matters because the name alone is not addressable. The creel DB is
+# Postgres and the target is a VIEW that need not sit on the connection's
+# search_path, so an unqualified `SELECT * FROM "vw_fishery_location"` fails
+# with 'relation does not exist' even though the view plainly exists and
+# information_schema just listed it. Going back through information_schema for
+# the schema, rather than trusting the string, also makes a hand-typed
+# LUT_TABLE case-insensitive -- quoted identifiers are case-SENSITIVE in
+# Postgres, so "VW_Fishery_Location" would otherwise fail the same way.
+resolve_table <- function(spec) {
+  parts <- str_split(spec, fixed("."))[[1]]
+  want_name   <- tail(parts, 1)
+  want_schema <- if (length(parts) >= 2) parts[length(parts) - 1] else NA_character_
+
+  hits <- all_columns |>
+    distinct(table_schema, table_name) |>
+    filter(tolower(table_name) == tolower(want_name),
+           is.na(want_schema) | tolower(table_schema) == tolower(want_schema))
+
+  if (nrow(hits) == 0) {
+    cli::cli_abort(c(
+      "No table or view named {.val {spec}} in this database's metadata.",
+      "i" = "Check {.file {file.path(OUT_DIR, 'location_lut_candidates.csv')}} for the exact spelling."
+    ))
+  }
+  if (nrow(hits) > 1) {
+    # Same name in several schemas: which one is a real choice, not a default.
+    cli::cli_abort(c(
+      "{.val {want_name}} exists in {nrow(hits)} schemas: {.val {hits$table_schema}}.",
+      "i" = "Schema-qualify it, e.g. {.code LUT_TABLE <- \"{hits$table_schema[1]}.{hits$table_name[1]}\"}."
+    ))
+  }
+  hits[1, ]
+}
+
+chosen_row <- if (!is.null(LUT_TABLE)) {
+  resolve_table(LUT_TABLE)
 } else if (nrow(candidates) == 1 || candidates$score[1] > candidates$score[2]) {
-  paste(na.omit(c(candidates$table_schema[1], candidates$table_name[1])), collapse = ".")
+  candidates[1, c("table_schema", "table_name")]
 } else {
   # A tie means the evidence does not single one out. Stopping here with the
   # table printed is more useful than picking one and capturing the wrong rows.
@@ -166,15 +203,22 @@ chosen <- if (!is.null(LUT_TABLE)) {
     "i" = "Pick one from the table above, set {.code LUT_TABLE} at the top of this script, and re-run."
   ))
 }
+chosen_schema <- chosen_row$table_schema
+chosen_name   <- chosen_row$table_name
+chosen        <- paste(na.omit(c(chosen_schema, chosen_name)), collapse = ".")
+
+if (is.na(chosen_schema)) {
+  # Only reachable via the dbListTables() fallback, which reports no schema.
+  cli::cli_alert_warning(
+    "No schema known for {.val {chosen_name}} -- querying unqualified. If that \\
+     fails with 'relation does not exist', schema-qualify LUT_TABLE."
+  )
+}
 cli::cli_alert_success("Using table {.val {chosen}}")
 
 # ------------------------------------------------------------------------------
 # Schema of the chosen table
 # ------------------------------------------------------------------------------
-
-chosen_parts  <- str_split(chosen, fixed("."))[[1]]
-chosen_schema <- if (length(chosen_parts) == 2) chosen_parts[1] else NA_character_
-chosen_name   <- tail(chosen_parts, 1)
 
 lut_schema <- all_columns |>
   filter(table_name == chosen_name,
@@ -212,6 +256,20 @@ name_col <- {
   }
 }
 
+# Print the SQL alongside any driver error: "relation does not exist" is
+# uninformative until you can see exactly what was sent.
+run_sql <- function(sql) {
+  tryCatch(
+    DBI::dbGetQuery(conn, sql) |> as_tibble(),
+    error = function(e) cli::cli_abort(c(
+      "Query failed: {conditionMessage(e)}",
+      "i" = "SQL was: {sql}",
+      "i" = "If this is 'relation does not exist', the object is not on the \\
+             connection's search_path -- schema-qualify {.code LUT_TABLE}."
+    ))
+  )
+}
+
 lut <- if (!is.na(name_col)) {
   cli::cli_alert_info("Filtering on {.field {name_col}} for {length(target_fisheries)} fishery-year(s).")
   sql <- paste0(
@@ -219,15 +277,13 @@ lut <- if (!is.na(name_col)) {
     " WHERE ", quote_id(name_col),
     " IN (", paste(as.character(DBI::dbQuoteString(conn, target_fisheries)), collapse = ", "), ")"
   )
-  DBI::dbGetQuery(conn, sql) |> as_tibble()
+  run_sql(sql)
 } else {
   cli::cli_alert_warning(
     "No fishery-name column found; pulling the whole table (capped at \\
      {MAX_UNFILTERED_ROWS} rows) so you can see how it keys to a fishery."
   )
-  DBI::dbGetQuery(conn, paste0("SELECT * FROM ", qualified)) |>
-    as_tibble() |>
-    head(MAX_UNFILTERED_ROWS)
+  run_sql(paste0("SELECT * FROM ", qualified)) |> head(MAX_UNFILTERED_ROWS)
 }
 
 if (nrow(lut) == 0) {
