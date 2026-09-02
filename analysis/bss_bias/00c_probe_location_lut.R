@@ -202,11 +202,21 @@ chosen_row <- if (!is.null(LUT_TABLE)) {
 } else if (nrow(candidates) == 1 || candidates$score[1] > candidates$score[2]) {
   candidates[1, c("table_schema", "table_name")]
 } else {
-  # A tie means the evidence does not single one out. Stopping here with the
-  # table printed is more useful than picking one and capturing the wrong rows.
+  # A tie means the evidence does not single one out. Stop, but carry the
+  # evidence in the error itself -- an abort that says "pick one from the table
+  # above" makes you go find the table.
+  tied <- candidates |> filter(score == score[1])
+  cli::cli_h3("Tied candidates")
+  tied |> select(table_schema, table_name, fishery_cols, section_cols, location_cols, all_cols) |>
+    print(n = 20, width = Inf)
   cli::cli_abort(c(
-    "Top {sum(candidates$score == candidates$score[1])} candidates tie on score -- not guessing.",
-    "i" = "Pick one from the table above, set {.code LUT_TABLE} at the top of this script, and re-run."
+    "Top {nrow(tied)} candidates tie on score -- not guessing.",
+    "i" = "Set one of these at the top of this script and re-run:",
+    set_names(
+      paste0("{.code LUT_TABLE <- \"", tied$table_schema, ".", tied$table_name, "\"}"),
+      rep("*", nrow(tied))
+    ),
+    "i" = "Full list: {.file {file.path(OUT_DIR, 'location_lut_candidates.csv')}}"
   ))
 }
 chosen_schema <- chosen_row$table_schema
