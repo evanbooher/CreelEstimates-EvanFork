@@ -99,7 +99,10 @@ all_columns <- tryCatch(
     FROM information_schema.columns
   ") |> as_tibble() |> rename_with(tolower),
   error = function(e) {
-    cli::cli_alert_warning("information_schema unavailable ({conditionMessage(e)}); falling back to dbListTables().")
+    cli::cli_alert_warning(
+      "information_schema unavailable ({conditionMessage(e)}); falling back to \\
+       dbListTables(), which reports NO SCHEMA -- see schema_of() below."
+    )
     tbls <- DBI::dbListTables(conn)
     map(tbls, function(t) {
       flds <- tryCatch(DBI::dbListFields(conn, t), error = function(e) character(0))
@@ -112,7 +115,10 @@ all_columns <- tryCatch(
 if (nrow(all_columns) == 0) {
   cli::cli_abort("Could not read any table metadata from the connection.")
 }
-cli::cli_alert_success("Read metadata for {n_distinct(all_columns$table_name)} table(s).")
+cli::cli_alert_success(
+  "Read metadata for {n_distinct(all_columns$table_name)} table(s) \\
+   ({if (all(is.na(all_columns$table_schema))) 'no schema info' else 'with schema info'})."
+)
 
 # What a fishery-by-location lookup looks like, in columns rather than in its
 # name. Deliberately loose -- the point is to surface candidates for a human to
@@ -207,12 +213,40 @@ chosen_schema <- chosen_row$table_schema
 chosen_name   <- chosen_row$table_name
 chosen        <- paste(na.omit(c(chosen_schema, chosen_name)), collapse = ".")
 
-if (is.na(chosen_schema)) {
-  # Only reachable via the dbListTables() fallback, which reports no schema.
-  cli::cli_alert_warning(
-    "No schema known for {.val {chosen_name}} -- querying unqualified. If that \\
-     fails with 'relation does not exist', schema-qualify LUT_TABLE."
+# The dbListTables() fallback reports no schema, and an unqualified name is not
+# addressable when the object is off the search_path -- which is exactly how the
+# first run failed. So when the metadata sweep gave us nothing, ask the server
+# for the schema directly rather than sending a query we know may not resolve.
+schema_of <- function(name) {
+  tryCatch(
+    {
+      hits <- DBI::dbGetQuery(conn, paste0("
+        SELECT n.nspname AS table_schema, c.relname AS table_name
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE lower(c.relname) = lower(", as.character(DBI::dbQuoteString(conn, name)), ")
+          AND c.relkind IN ('r', 'v', 'm', 'f', 'p')
+      "))
+      if (nrow(hits) == 1) hits else NULL
+    },
+    # Not Postgres, or the catalog is not readable. Fall through to unqualified.
+    error = function(e) NULL
   )
+}
+
+if (is.na(chosen_schema)) {
+  found <- schema_of(chosen_name)
+  if (!is.null(found)) {
+    chosen_schema <- found$table_schema[1]
+    chosen_name   <- found$table_name[1]
+    chosen        <- paste(chosen_schema, chosen_name, sep = ".")
+    cli::cli_alert_info("Recovered schema from pg_catalog: {.val {chosen}}")
+  } else {
+    cli::cli_alert_warning(
+      "No schema known for {.val {chosen_name}} -- querying unqualified. If that \\
+       fails with 'relation does not exist', set {.code LUT_TABLE <- \"<schema>.{chosen_name}\"}."
+    )
+  }
 }
 cli::cli_alert_success("Using table {.val {chosen}}")
 
