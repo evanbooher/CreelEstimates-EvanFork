@@ -1,34 +1,34 @@
 fishery_name,est_date_start,est_date_end,n_days_window,resolve_status,resolve_note,captured_at
-Skagit fall salmon 2021,2021-08-14,2021-12-31,140,ok,NA,2026-08-31 22:07:49 PDT
-Skagit fall salmon 2022,2022-09-01,2022-11-30,91,ok,NA,2026-08-31 22:07:49 PDT
-Skagit fall salmon 2023,2023-08-14,2023-11-30,109,ok,NA,2026-08-31 22:07:49 PDT
-Skagit fall salmon 2024,2024-09-01,2024-11-30,91,ok,NA,2026-08-31 22:07:49 PDT
-Skagit fall salmon 2025,2025-08-16,2025-11-18,95,ok,NA,2026-08-31 22:07:49 PDT
+Skagit fall salmon 2021,2021-08-14,2021-12-31,140,ok,NA,2026-09-02 16:31:27 PDT
+Skagit fall salmon 2022,2022-09-01,2022-11-30,91,ok,NA,2026-09-02 16:31:27 PDT
+Skagit fall salmon 2023,2023-08-14,2023-11-30,109,ok,NA,2026-09-02 16:31:27 PDT
+Skagit fall salmon 2024,2024-09-01,2024-11-30,91,ok,NA,2026-09-02 16:31:27 PDT
+Skagit fall salmon 2025,2025-08-16,2025-11-18,95,ok,NA,2026-09-02 16:31:27 PDT
 Skagit fall salmon 2026,2026-08-16,2026-08-30,15,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2021 lower,2021-05-19,2021-05-31,13,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2021 upper,2021-06-01,2021-07-15,45,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2022 lower,2022-05-01,2022-05-31,31,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2022 upper,2022-06-01,2022-07-15,45,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2023 lower,2023-05-01,2023-05-31,31,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2023 upper,2023-06-01,2023-07-15,45,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2024 lower,2024-04-24,2024-05-31,38,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2024 upper,2024-05-29,2024-07-15,48,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2025 lower,2025-04-24,2025-05-31,38,ok,NA,2026-08-31 22:07:49 PDT
-Skagit spring Chinook 2025 upper,2025-05-28,2025-07-15,49,ok,NA,2026-08-31 22:07:49 PDT
+Skagit spring Chinook 2021 lower,2021-05-19,2021-05-31,13,ok,NA,2026-09-02 16:31:27 PDT
+Skagit spring Chinook 2021 upper,2021-06-01,2021-07-15,45,ok,NA,2026-09-02 16:31:27 PDT
+Skagit spring Chinook 2022 lower,2022-05-01,2022-05-31,31,ok,NA,2026-09-02 16:31:27 PDT
+Skagit spring Chinook 2022 upper,2022-06-01,2022-07-15,45,ok,NA,2026-09-02 16:31:27 PDT
+Skagit spring Chinook 2023 lower,2023-05-01,2023-05-31,31,ok,NA,2026-09-02 16:31:27 PDT
+Skagit spring Chinook 2023 upper,2023-06-01,2023-07-15,45,ok,NA,2026-09-02 16:31:27 PDT
+Skagit spring Chinook 2024 lower,2024-04-24,2024-05-31,38,ok,NA,2026-09-02 16:31:27 PDT
+Skagit spring Chinook 2024 upper,2024-05-29,2024-07-15,48,ok,NA,2026-09-02 16:31:27 PDT
+Skagit spring Chinook 2025 lower,2025-04-24,2025-05-31,38,ok,NA,2026-09-02 16:31:27 PDT
+Skagit spring Chinook 2025 upper,2025-05-28,2025-07-15,49,ok,NA,2026-09-02 16:31:27 PDT
 Skagit spring Chinook 2026 lower,2026-04-20,2026-05-15,26,ok,NA,2026-08-31 22:07:49 PDT
 Skagit spring Chinook 2026 upper,2026-05-16,2026-07-15,61,ok,NA,2026-08-31 22:07:49 PDT
-Skagit summer sockeye 2022,2022-06-16,2022-07-29,44,ok,NA,2026-08-31 22:07:49 PDT
-Skagit summer sockeye 2023,2023-06-16,2023-07-15,30,ok,NA,2026-08-31 22:07:49 PDT
-Skagit summer sockeye 2024,2024-06-16,2024-07-31,46,ok,NA,2026-08-31 22:07:49 PDT
-Skagit summer sockeye 2025,2025-06-16,2025-07-31,46,ok,NA,2026-08-31 22:07:49 PDT
+Skagit summer sockeye 2022,2022-06-16,2022-07-29,44,ok,NA,2026-09-02 16:31:27 PDT
+Skagit summer sockeye 2023,2023-06-16,2023-07-15,30,ok,NA,2026-09-02 16:31:27 PDT
+Skagit summer sockeye 2024,2024-06-16,2024-07-31,46,ok,NA,2026-09-02 16:31:27 PDT
+Skagit summer sockeye 2025,2025-06-16,2025-07-31,46,ok,NA,2026-09-02 16:31:27 PDT
 Skagit summer sockeye 2026,2026-06-16,2026-07-31,46,ok,NA,2026-08-31 22:07:49 PDT
-Snohomish fall salmon 2021,2021-08-23,2021-10-10,49,ok,NA,2026-08-31 22:07:49 PDT
-Snohomish fall salmon 2022,2022-10-29,2022-11-30,33,ok,NA,2026-08-31 22:07:49 PDT
-Snohomish fall salmon 2023,2023-09-01,2023-11-30,91,ok,NA,2026-08-31 22:07:49 PDT
-Snohomish fall salmon 2024,2024-09-21,2024-11-30,71,ok,NA,2026-08-31 22:07:49 PDT
-Snohomish fall salmon 2025,2025-08-23,2025-11-15,85,ok,NA,2026-08-31 22:07:49 PDT
-Stillaguamish salmon and gamefish 2022-23,2022-09-01,2022-11-30,91,ok,NA,2026-08-31 22:07:49 PDT
-Stillaguamish salmon and gamefish 2023-24,2023-09-16,2023-09-27,12,ok,NA,2026-08-31 22:07:49 PDT
-Stillaguamish salmon and gamefish 2024-25,2024-09-16,2024-11-30,76,ok,NA,2026-08-31 22:07:49 PDT
-Stillaguamish salmon and gamefish 2025-26,2025-09-01,2025-10-31,61,ok,NA,2026-08-31 22:07:49 PDT
+Snohomish fall salmon 2021,2021-08-23,2021-10-10,49,ok,NA,2026-09-02 16:31:27 PDT
+Snohomish fall salmon 2022,2022-10-29,2022-11-30,33,ok,NA,2026-09-02 16:31:27 PDT
+Snohomish fall salmon 2023,2023-09-01,2023-11-30,91,ok,NA,2026-09-02 16:31:27 PDT
+Snohomish fall salmon 2024,2024-09-21,2024-11-30,71,ok,NA,2026-09-02 16:31:27 PDT
+Snohomish fall salmon 2025,2025-08-23,2025-11-15,85,ok,NA,2026-09-02 16:31:27 PDT
+Stillaguamish salmon and gamefish 2022-23,2022-09-01,2022-11-30,91,ok,NA,2026-09-02 16:31:27 PDT
+Stillaguamish salmon and gamefish 2023-24,2023-09-16,2023-09-27,12,ok,NA,2026-09-02 16:31:27 PDT
+Stillaguamish salmon and gamefish 2024-25,2024-09-16,2024-11-30,76,ok,NA,2026-09-02 16:31:27 PDT
+Stillaguamish salmon and gamefish 2025-26,2025-09-01,2025-10-31,61,ok,NA,2026-09-02 16:31:27 PDT
 Stillaguamish salmon and gamefish 2026,2026-08-29,2026-08-30,2,ok,NA,2026-08-31 22:07:49 PDT
