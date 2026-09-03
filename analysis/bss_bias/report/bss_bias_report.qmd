@@ -233,7 +233,7 @@ if (!is.null(T1)) {
       `Year type` = parity, Likelihood = likelihood,
       b = round(b_median, 3), `q10` = round(q10, 3), `q90` = round(q90, 3),
       `Prior contraction` = round(prior_contraction, 3),
-      Flag = informed_flag, Tier = comparability_tier,
+      Flag = informed_flag,
       `Window (days)` = n_days_in_window
     ) |>
     interactive_table(page_length = 20)
@@ -388,92 +388,85 @@ approximation to rung 4, and worth stating plainly rather than discovering
 later. Rung 4 is a model rewrite, not a config change.
 :::
 
-## 5. Comparability caveats
+## 5. Is it the same fishery each year?
 
-Before comparing `b` across years, the group has to agree which fishery-years
-are comparable at all.
+Before comparing `b` across years, the group has to agree the years are
+comparable at all. Two things decide that, and they are not the same:
 
-```{r}
-#| results: asis
-p <- fig_path("fig2_comparability_strip")
-if (is.null(p)) missing_note("analysis/bss_bias/03_plot_b_series.R") else cat(paste0("![](", p, ")\n"))
-```
+- **what the program defined** — the water bodies, sections and survey sites in
+  the location lookup;
+- **what the survey record actually holds** — the days worked, and among those,
+  the days carrying *both* an index count and the census count it pairs with.
 
-### Season duration and timing
-
-Estimation windows are **not stable across years**. Skagit fall salmon has run
-91–140 days; Snohomish fall salmon 33–91; Stillaguamish 2023-24 was 12 days,
-its season cut short on Chinook impacts. Start dates move by weeks.
-
-This matters directly for the first-order question: **when the window moves,
-some of the year-to-year variation in `b` is a window artifact rather than a
-change in vehicle-index bias.** τ² computed across such years mixes the two.
+The last of those is the one that governs `b`. `b` is a single pooled scalar
+(`vector[G] b` in the Stan model, with no section or day index), so it is
+informed **only** by section-days holding both counts — not by every surveyed
+day, and not at all by the size of the defined footprint.
 
 ```{r}
 #| results: asis
-# Render only the columns this file actually has. A bss_b_comparability.csv
-# written by an earlier version of 02 lacks the newer duration/timing columns,
-# and that is a normal state mid-transition -- it should degrade to a smaller
-# table plus a note saying what to re-run, not kill the render.
-comp_cols <- c(
-  Basin = "basin", Fishery = "fishery_type", Season = "season_label",
-  Tier = "comparability_tier", Start = "date_start", End = "date_end",
-  Days = "n_days_in_window", `Open days` = "n_days_open",
-  `Start vs ref` = "start_shift_days", `Length vs ref` = "pct_of_ref_days",
-  `CRC area(s)` = "crc_areas", `Section(s)` = "section_nums",
-  `Count types` = "count_types_present"
-)
-
-if (!is.null(comp)) {
-  absent <- comp_cols[!comp_cols %in% names(comp)]
-  if (length(absent) > 0) {
-    cat(paste0(
-      "::: {.callout-note}\n## Comparability table predates the current pipeline\n",
-      "`bss_b_comparability.csv` is missing: `", paste(absent, collapse = "`, `"), "`. ",
-      "Re-run `analysis/bss_bias/02_build_comparability_table.R` and re-render to get the full table.\n:::\n\n"
-    ))
-  }
-}
+p <- fig_path("fig16_fishery_composition")
+if (is.null(p)) missing_note("analysis/bss_bias/02b_survey_coverage.R") else cat(paste0("![](", p, ")\n"))
 ```
+
+Read the rows top to bottom: sections defined → sections surveyed → days
+surveyed → paired days. **A gap opening between consecutive rows is where a
+plan stopped becoming data.**
 
 ```{r}
-if (!is.null(comp)) {
-  present <- comp_cols[comp_cols %in% names(comp)]
-  d <- comp |> select(all_of(present))
-  if ("Length vs ref" %in% names(d)) {
-    d <- d |> mutate(`Length vs ref` = if_else(is.na(`Length vs ref`), NA_character_,
-                                                paste0(round(100 * `Length vs ref`), "%")))
-  }
-  interactive_table(d, page_length = 20)
+composition <- read_out("bss_b_fishery_composition.csv")
+if (!is.null(composition)) {
+  composition |>
+    transmute(
+      Fishery = fishery_type, Year = year, Water = water_bodies,
+      `Sections defined` = sections_defined, `Index sites` = index_sites_defined,
+      `Window days` = n_days_window, `Sections surveyed` = sections_surveyed,
+      `Days surveyed` = n_days_surveyed, `Paired index+census days` = n_days_tie_in
+    ) |>
+    interactive_table(page_length = 20)
+} else {
+  missing_note("analysis/bss_bias/02b_survey_coverage.R")
 }
 ```
 
-### What the tiers mean
+### What this does to the variability question
 
-Within each series the **most recent year is the reference**; every other year
-is compared against it.
+Two consequences worth carrying into every number above.
 
-| Tier | Trigger |
-|---|---|
-| `not-estimable` | No vehicle counts -- `b[1]` is not estimated from data at all |
-| `reference` | The anchor year itself |
-| `not-comparable` | Study design, count types, or `p_TI` changed vs. reference |
-| `comparable-with-caveat` | CRC area / sections / season window shifted, or a thin sample |
-| `comparable` | None of the above |
+**The evidence behind `b` is thinner than the survey record suggests.** Skagit
+fall salmon surveyed 50 days in 2024 and produced 7 paired ones; Stillaguamish
+surveyed 33 days in 2022-23 for 2. The markers in Figures 1 and 1b are sized by
+this count, so a point resting on almost nothing looks like it.
+
+**Estimation windows are not stable across years.** Skagit fall salmon has run
+91–140 days, Snohomish fall salmon 33–91, and Stillaguamish 2023-24 was 12 days
+with its season cut short on Chinook impacts. Because `b` is pooled across all
+days, a moved window changes which period it averages — so some year-to-year
+movement in `b` is a window artifact rather than a change in vehicle-index bias,
+and τ² computed across such years mixes the two.
+
+That second point bears directly on §3: in Skagit fall salmon and Snohomish
+fall salmon, **every odd year starts in mid-August and every even year on 1
+September**, so a pink-year coefficient in those basins would be estimating
+"August plus pink". `bss_b_parity_confound.csv` states this per fishery, and
+`bss_b_common_window_cost.csv` gives the window all years share along with what
+refitting there would cost in paired days.
+
 
 ::: {.callout-important}
-## These rules are proposals, not findings
-Three things worth deciding in the room:
-
-1. **Comparable is the default.** A year is `comparable` unless a specific
-   check fires. Anything not on the checklist is invisible to it.
-2. **Season duration and timing are reported but do NOT affect the tier.**
-   `start_shift_days` and `pct_of_ref_days` are shown above and flagged beyond
-   ±14 days / ±25%, but deliberately do not downgrade a year. One line in
-   `02_build_comparability_table.R` changes that if the group wants it to.
-3. **Variance components in §2–3 are computed over ALL fishery-years**, not
-   only comparable ones. A tier-restricted sensitivity run is one filter away
-   (`INCLUDE_TIERS` in `06_variability_analysis.R`).
+## What still needs deciding in the room
+1. **Nothing here downgrades a year automatically.** The window and coverage
+   differences above are reported, not scored. Whether a year with 2 paired
+   days belongs in the same τ² as one with 18 is a judgement the group has to
+   make, and it is not made anywhere in this pipeline.
+2. **Variance components in §2–3 are computed over ALL fishery-years.** A
+   restricted sensitivity run is one filter away (`INCLUDE_TIERS` in
+   `06_variability_analysis.R`), and `bss_b_fishery_composition.csv` is the
+   table to pick that restriction from.
+3. **Section numbering is not stable between years.** Blocks get split and
+   everything above them renumbered, so a section number is a label rather
+   than a place. `bss_b_lut_block_lineage.csv` matches blocks between years on
+   their site membership and separates a renumbering from a genuine redraw.
 :::
 
 ## Appendix
