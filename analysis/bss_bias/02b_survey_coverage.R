@@ -418,7 +418,10 @@ ramp <- survey_days |>
 
 fig14 <- ramp |>
   ggplot(aes(x = day_of_season, y = n_sections_surveyed_7d, colour = factor(year))) +
-  geom_line(linewidth = 1) +
+  # na.rm: the rolling mean is undefined for the half-window at each end of a
+  # season. Those NAs are expected, so drop them quietly rather than emitting a
+  # "removed N rows" warning that reads like a data problem.
+  geom_line(linewidth = 1, na.rm = TRUE) +
   facet_wrap(~fishery_type, scales = "free", ncol = 2) +
   scale_colour_manual(values = colorRampPalette(SEQ_RAMP)(n_distinct(ramp$year)),
                       name = NULL) +
