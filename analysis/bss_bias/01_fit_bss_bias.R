@@ -187,6 +187,13 @@ FIT_CONFIG_NAME <- "quick"   # <-- default is the fast/throwaway config; change 
 #   e.g. ONLY_FISHERIES <- c("Skagit fall salmon 2024")
 ONLY_FISHERIES <- NULL
 
+# Narrow a whole run to particular water and tag its outputs, so a fork-scoped
+# fit sits alongside the whole-fishery one instead of overwriting it. NULL (the
+# default) fits every fishery-year whole. Set before scope_rules.R is sourced
+# below; see that file for the shape and for why a fork scope needs its
+# prior_contraction checked.
+RUN_SCOPE <- NULL
+
 SAVE_FITS <- FALSE   # TRUE keeps the full stanfit per fishery-year (large!); the small
                       # b-summary + draws are the actual deliverable and are always saved.
 
@@ -615,6 +622,13 @@ align_bss_sections <- function(dwg_summ, days, fishery_name) {
 
 fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est_dates = NULL) {
 
+  # Data is fetched and scoped by the REAL fishery name; results are FILED under
+  # out_name, which carries the run-scope tag when there is one.
+  out_name <- output_name(fishery_name)
+  if (!identical(out_name, fishery_name)) {
+    cli::cli_alert_info("  Run scope {.val {RUN_SCOPE$tag}}: filing results as {.val {out_name}}.")
+  }
+
   study_design <- resolve_study_design(fishery_name)
   cli::cli_h2("Processing: {.val {fishery_name}} [design: {.val {study_design}}]")
 
@@ -720,7 +734,7 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
 
   comparability_row <- run_stage("comparability_row", {
     tibble(
-      fishery_name           = fishery_name,
+      fishery_name           = out_name,
       study_design            = study_design,
       date_start               = date_start,
       date_end                 = date_end,
@@ -766,7 +780,7 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   append_csv_row(
     bind_rows(lapply(recode_tables, function(nm) {
       r <- angler_recode[[nm]]
-      tibble(fishery_name = fishery_name, table = nm, n_before = r$n_before,
+      tibble(fishery_name = out_name, table = nm, n_before = r$n_before,
              n_dropped = r$n_dropped, n_recoded = r$n_recoded, dropped_labels = r$dropped_labels)
     })),
     file.path(OUT_DIR, "bss_b_angler_recode.csv")
@@ -789,7 +803,9 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   # Make S, O, p_TI and every section_* index agree before Stan ever sees them.
   # See align_bss_sections() above for why this is needed and why it is a no-op
   # for the fishery-years that already fit.
-  aligned <- run_stage("align_sections", align_bss_sections(dwg_summ, dwg$days, fishery_name))
+  # out_name: the renumbering depends on the scope, so a fork-scoped run must
+  # not overwrite the whole-fishery map under the same key.
+  aligned <- run_stage("align_sections", align_bss_sections(dwg_summ, dwg$days, out_name))
   dwg_summ  <- aligned$dwg_summ
   days_bss  <- aligned$days
   append_csv_row(aligned$map, file.path(OUT_DIR, "bss_b_section_map.csv"))
@@ -810,7 +826,7 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   # (for expediency; see R_functions/drop_na_bss_inputs.R for what is and
   # isn't safe to drop) BEFORE the preflight checks below, so V_n/IntA/etc.
   # reflect the post-drop counts.
-  inputs_bss <- run_stage("drop_na_bss_inputs", drop_na_bss_inputs(inputs_bss, fishery_name = fishery_name))
+  inputs_bss <- run_stage("drop_na_bss_inputs", drop_na_bss_inputs(inputs_bss, fishery_name = out_name))
   na_drop_log <- attr(inputs_bss, "na_drop_log")
   if (!is.null(na_drop_log) && nrow(na_drop_log) > 0) {
     append_csv_row(na_drop_log, file.path(OUT_DIR, "bss_b_na_drops.csv"))
@@ -847,7 +863,7 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   if (b_weakly_informed) cli::cli_alert_warning("  IntA = {inputs_bss$IntA} < {MIN_INTA_INFORMATIVE}; b likely weakly informed.")
 
   stan_dims_row <- tibble(
-    fishery_name = fishery_name, D = inputs_bss$D, G = inputs_bss$G, S = inputs_bss$S, H = inputs_bss$H,
+    fishery_name = out_name, D = inputs_bss$D, G = inputs_bss$G, S = inputs_bss$S, H = inputs_bss$H,
     V_n = inputs_bss$V_n, T_n = inputs_bss$T_n, A_n = inputs_bss$A_n, E_n = inputs_bss$E_n,
     IntC = inputs_bss$IntC, IntA = inputs_bss$IntA,
     section_max = if (length(sec_idx)) max(sec_idx) else NA_integer_,
@@ -908,7 +924,7 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   n_div <- sum(vapply(sp, function(x) sum(x[, "divergent__"]), numeric(1)))
 
   bias_summary <- run_stage("get_bss_bias", {
-    get_bss_bias(bss_fit, fishery_name = fishery_name, ecg = chosen_ecg,
+    get_bss_bias(bss_fit, fishery_name = out_name, ecg = chosen_ecg,
                  prior_sigma_b = BSS_PRIORS[["value_lognormal_sigma_b"]])
   }) |>
     mutate(
@@ -924,9 +940,9 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   append_csv_row(bias_summary, file.path(OUT_DIR, "bss_b_summary.csv"))
 
   draws <- posterior::as_draws_df(bss_fit) |> posterior::subset_draws(variable = "b")
-  saveRDS(draws, file.path(DRAWS_DIR, paste0(safe_name(fishery_name), ".rds")))
+  saveRDS(draws, file.path(DRAWS_DIR, paste0(safe_name(out_name), ".rds")))
 
-  if (SAVE_FITS) saveRDS(bss_fit, file.path(FITS_DIR, paste0(safe_name(fishery_name), ".rds")))
+  if (SAVE_FITS) saveRDS(bss_fit, file.path(FITS_DIR, paste0(safe_name(out_name), ".rds")))
 
   list(status = "ok", bias_summary = bias_summary, runtime_sec = runtime_sec)
 }
@@ -996,22 +1012,22 @@ run_ledger <- map(target_fisheries, function(fn) {
     tryCatch(
       {
         res <- fit_one_fishery(fn, est_dates = est_dates)
-        bind_cols(tibble(fishery_name = fn, status = "ok", stage = NA_character_, reason = NA_character_,
+        bind_cols(tibble(fishery_name = output_name(fn), status = "ok", stage = NA_character_, reason = NA_character_,
                          runtime_sec = res$runtime_sec), window_cols)
       },
       fishery_skip = function(cnd) {
         cli::cli_alert_warning("Skipped [{.val {fn}}]: {conditionMessage(cnd)}")
-        bind_cols(tibble(fishery_name = fn, status = "skipped", stage = cnd$stage %||% "unknown",
+        bind_cols(tibble(fishery_name = output_name(fn), status = "skipped", stage = cnd$stage %||% "unknown",
                          reason = cnd$reason %||% conditionMessage(cnd), runtime_sec = NA_real_), window_cols)
       },
       fishery_error = function(cnd) {
         cli::cli_alert_danger("Failed [{.val {fn}}] at stage {.val {cnd$stage}}: {cnd$reason}")
-        bind_cols(tibble(fishery_name = fn, status = "error", stage = cnd$stage %||% "unknown",
+        bind_cols(tibble(fishery_name = output_name(fn), status = "error", stage = cnd$stage %||% "unknown",
                          reason = cnd$reason %||% conditionMessage(cnd), runtime_sec = NA_real_), window_cols)
       },
       error = function(e) {
         cli::cli_alert_danger("Failed [{.val {fn}}] (unstaged): {conditionMessage(e)}")
-        bind_cols(tibble(fishery_name = fn, status = "error", stage = "unstaged",
+        bind_cols(tibble(fishery_name = output_name(fn), status = "error", stage = "unstaged",
                          reason = conditionMessage(e), runtime_sec = NA_real_), window_cols)
       }
     ),

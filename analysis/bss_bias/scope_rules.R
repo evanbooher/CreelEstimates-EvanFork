@@ -93,6 +93,46 @@ WATER_BODY_RESTRICTIONS <- list(
   list(pattern = regex("Skagit spring Chinook.*upper", ignore_case = TRUE), keep = "Skagit")
 )
 
+# ------------------------------------------------------------------------------
+# RUN SCOPE -- fit `b` to part of a fishery rather than all of it
+# ------------------------------------------------------------------------------
+# The standing rules above hold a SERIES comparable across its own years. This
+# is different: a whole run narrowed to particular water, with its outputs
+# TAGGED so they sit alongside the whole-fishery ones instead of overwriting
+# them. Every output in 01 is keyed on the fishery name, and the tag becomes
+# part of that key -- so "Stillaguamish ... 2024-25" and
+# "Stillaguamish ... 2024-25 [MS]" coexist in the ledger, the b summary, the
+# draws directory and everything downstream of them.
+#
+# The motivating case: the proposed Stillaguamish fishery is North Fork
+# gamefish and mainstem coho, so a mainstem-only or North-Fork-only `b` is the
+# scope that matches it. `b` is a single pooled scalar, so a whole-basin fit
+# averages the mainstem together with water that fishery will not touch.
+#
+# To run one, set this in 01_fit_bss_bias.R BEFORE it sources this file, or
+# edit it here, and re-run:
+#
+#   RUN_SCOPE <- list(tag = "MS",
+#                     pattern = regex("Stillaguamish", ignore_case = TRUE),
+#                     keep    = "Stillaguamish - MS")
+#
+# EXPECT FEWER OBSERVATIONS. `b` is informed only by section-days carrying both
+# an index and a census count -- 2 to 6 per year for the whole Stillaguamish
+# basin -- and a fork-only scope keeps a fraction of those. Read
+# prior_contraction in bss_b_summary.csv before drawing anything from the
+# result: a fork-scoped `b` may be mostly prior.
+#
+# Left alone by whatever sources this file first, so 01 can set it beforehand
+# and 02a (which has no run scope) still gets a definition.
+if (!exists("RUN_SCOPE", inherits = FALSE)) RUN_SCOPE <- NULL
+
+# The name an output is filed under. Identical to fishery_name when RUN_SCOPE
+# is NULL or does not match, so a default run is exactly what it always was.
+output_name <- function(fishery_name) {
+  if (is.null(RUN_SCOPE) || !str_detect(fishery_name, RUN_SCOPE$pattern)) return(fishery_name)
+  paste0(fishery_name, " [", RUN_SCOPE$tag, "]")
+}
+
 # Committed by 00c_probe_location_lut.R. Read lazily and cached: a fishery-name
 # run with no water-body rule never needs it, and a run of 27 fisheries should
 # not read the same file 27 times.
@@ -173,6 +213,10 @@ fishery_section_limit <- function(fishery_name) {
     if (str_detect(fishery_name, r$pattern)) {
       limits <- c(limits, list(sections_in_water_bodies(fishery_name, r$keep)))
     }
+  }
+  # A run-level scope composes with the standing rules like any other limit.
+  if (!is.null(RUN_SCOPE) && str_detect(fishery_name, RUN_SCOPE$pattern)) {
+    limits <- c(limits, list(sections_in_water_bodies(fishery_name, RUN_SCOPE$keep)))
   }
   if (length(limits) == 0) return(NULL)
   keep <- Reduce(intersect, limits)
