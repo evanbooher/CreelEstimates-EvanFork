@@ -7,33 +7,49 @@
 #   00c_probe_location_lut.R, so it needs no VPN, no database and no network.
 #
 # ------------------------------------------------------------------------------
+# THE DATA MODEL, AND WHY IT DECIDES WHAT TO MEASURE
+#
+#   SITE     -- a discrete location where INDEX counts occur.
+#   SECTION  -- the block sites are nested in. CENSUS (tie-in) counts total
+#               EVERYTHING in the block, paired with a scheduled index count.
+#               Interviews can occur anywhere in the block, not only at sites.
+#
+#   Sections are the spatial unit the data aggregate to for estimation. They
+#   often follow a real boundary -- a sport-fishing pamphlet break, a CRC
+#   break, a closure line -- but not necessarily.
+#
+#   That structure is the whole reason this script matters to `b`. `b` is the
+#   ratio linking an index count to the census count it is paired with, so:
+#
+#     * the SITES in a block determine what the index count sees;
+#     * the SECTION boundary determines what the census count totals;
+#     * `b` is what absorbs the difference between the two.
+#
+#   So re-drawing a section is NOT neutral for `b`, even when every site is
+#   kept. Split one block into two and each new block has its own
+#   sites-to-block coverage, which need not equal the original's -- and `b` is
+#   a single scalar fit across all of them. sites_per_section is therefore
+#   tracked as a first-class quantity here, not as a by-product.
+#
+# ------------------------------------------------------------------------------
 # WHICH SIGNAL TO TRUST, AND IN WHAT ORDER
 #
-#   The lookup carries three descriptions of where a fishery happened, and they
-#   are NOT equally reliable:
+#   1. SURVEY SITES (location_id) -- the most reliable. A site is a physical,
+#      named place. The same sites in two years means index counts were looking
+#      at the same places.
 #
-#   1. SURVEY SITES (location_id) -- the primary signal. A site is a physical,
-#      named place: a boat ramp, an access point, a hole. If the same sites are
-#      surveyed in two years, the fishery covered the same water, however the
-#      paperwork around them changed. This is the test that answers "is this
-#      the same fishery in aggregate".
-#
-#   2. SECTIONS -- administrative groupings of sites, and they get redrawn. The
-#      Skagit split sections at Hwy 9 to give closures a boundary: the spatial
-#      units changed while the footprint did not. So a section change is a
-#      PROMPT TO CHECK THE CLOSURES, not a finding on its own -- and the
-#      closures themselves would have changed fishing dynamics, which is the
-#      part that could actually move `b`.
+#   2. SECTIONS -- reliable as recorded, but they change meaning between years:
+#      a section number is a label on a block, and blocks get redrawn. Track
+#      what is IN a section, never the number itself.
 #
 #   3. RIVER MILES -- reported here, but treat as unvalidated. They need
 #      checking in their own right, so nothing in this script's conclusions
-#      rests on them. bss_b_lut_rm_consistency.csv is the check: the same
-#      site should carry the same river mile every year, and where it does not,
-#      the river miles are not yet trustworthy for that fishery.
+#      rests on them. bss_b_lut_rm_consistency.csv is the check: the same site
+#      should carry the same river mile every year, and where it does not, the
+#      river miles are not yet trustworthy for that fishery.
 #
-#   Water body is nonetheless part of the grain throughout, because a section
-#   number only identifies a place within one, and every tributary restarts at
-#   river mile 0 at its confluence.
+#   Water body is part of the grain throughout, because a section number only
+#   identifies a block within one, and every tributary restarts at river mile 0.
 #
 # Usage:
 #   Rscript analysis/bss_bias/02a_location_lut_changes.R
@@ -43,7 +59,9 @@
 #
 # Outputs (analysis/bss_bias/outputs/):
 #   bss_b_lut_site_stability.csv    -- PRIMARY: per year, sites retained/added/dropped vs prior and first year
-#   bss_b_lut_site_moves.csv        -- sites that persisted but changed section (the re-partitioning signature)
+#   bss_b_lut_index_density.csv     -- index sites per section-block, the coverage ratio `b` absorbs
+#   bss_b_lut_index_density_summary.csv -- per fishery-year: blocks, sites per block, spread
+#   bss_b_lut_site_moves.csv        -- sites kept but re-blocked, so paired with a different census count
 #   bss_b_lut_location_changes.csv  -- per site: years present, persistent/added/dropped/intermittent
 #   bss_b_lut_section_year.csv      -- fishery_type x year x water body x section
 #   bss_b_lut_water_body_year.csv   -- fishery_type x year x water body
@@ -55,6 +73,7 @@
 #   figures/fig9_lut_site_persistence.{png,pdf}
 #   figures/fig10_lut_site_turnover.{png,pdf}
 #   figures/fig11_lut_section_year.{png,pdf}
+#   figures/fig12_lut_index_density.{png,pdf}
 # ==============================================================================
 
 library(tidyverse)
@@ -190,11 +209,15 @@ site_stability |>
 # ------------------------------------------------------------------------------
 # Sites that stayed but were re-grouped
 # ------------------------------------------------------------------------------
-# The Hwy 9 signature: the site is still surveyed, the section it belongs to
-# changed. Separating this from "the site went away" is the whole point -- one
-# is a paperwork change, the other is a footprint change. A re-grouping is
-# still worth following up, because sections are what closures are written
-# against, and a closure change WOULD move fishing dynamics.
+# The Hwy 9 signature: the site is still surveyed, the block it sits in changed.
+# Separating this from "the site went away" matters, but NEITHER is benign for
+# `b`: a re-blocked site keeps feeding an index count, and now that count is
+# paired with a different census total. Whatever site-to-block coverage ratio
+# `b` had absorbed for the old block no longer describes either new one.
+#
+# It is also the list to take to the closure record. Sections are often drawn
+# on a closure line, and a closure change would move fishing dynamics on top of
+# the coverage change.
 
 site_moves <- sites |>
   group_by(basin, fishery_type, location_id, location_code) |>
@@ -214,6 +237,62 @@ if (nrow(site_moves) > 0) {
   cli::cli_h3("Sites kept but re-assigned -- check the closures for these years")
   site_moves |> count(fishery_type, name = "n_sites_regrouped") |> print()
 }
+
+# ------------------------------------------------------------------------------
+# Index-site density per block -- the ratio `b` absorbs
+# ------------------------------------------------------------------------------
+# An index count sees the sites; the census count it is paired with totals the
+# whole block. So how many index sites sit in a block is a direct proxy for the
+# coverage fraction `b` has to carry -- and `b` is one scalar fit across every
+# block in the fishery. A year whose blocks hold a consistent number of sites
+# is one where a single `b` is a reasonable description; a year with 1 site in
+# one block and 9 in another is asking `b` to average over a wide spread.
+#
+# LUT convention, confirmed against the capture: location_type "Site" rows are
+# the index sites, "Section" rows are the census blocks.
+
+index_density <- lut |>
+  filter(location_type == "Site") |>
+  group_by(basin = basin_of(fishery_type), fishery_type, year, water_body_code, section_num) |>
+  summarise(n_index_sites = n_distinct(location_id), .groups = "drop") |>
+  left_join(
+    lut |>
+      filter(location_type == "Section") |>
+      distinct(fishery_type, year, water_body_code, section_num) |>
+      mutate(has_census_block = TRUE),
+    by = c("fishery_type", "year", "water_body_code", "section_num")
+  ) |>
+  mutate(has_census_block = coalesce(has_census_block, FALSE)) |>
+  arrange(basin, fishery_type, year, water_body_code, section_num)
+
+write_csv(index_density, file.path(OUT_DIR, "bss_b_lut_index_density.csv"))
+
+# Per fishery-year: how evenly the sites are spread across blocks. The SPREAD
+# is the point, not the mean -- `b` is a single scalar, so an uneven year is
+# one where no single value fits every block equally well.
+density_summary <- index_density |>
+  group_by(basin, fishery_type, year) |>
+  summarise(
+    n_blocks              = n(),
+    n_index_sites         = sum(n_index_sites),
+    sites_per_block_mean  = round(mean(n_index_sites), 2),
+    sites_per_block_min   = min(n_index_sites),
+    sites_per_block_max   = max(n_index_sites),
+    blocks_without_census = sum(!has_census_block),
+    .groups = "drop"
+  ) |>
+  group_by(fishery_type) |>
+  mutate(mean_change_vs_prior = round(sites_per_block_mean - lag(sites_per_block_mean), 2)) |>
+  ungroup()
+
+write_csv(density_summary, file.path(OUT_DIR, "bss_b_lut_index_density_summary.csv"))
+cli::cli_alert_success("Wrote bss_b_lut_index_density.csv and bss_b_lut_index_density_summary.csv.")
+
+cli::cli_h2("Index sites per census block")
+density_summary |>
+  select(fishery_type, year, n_blocks, n_index_sites, sites_per_block_mean,
+         sites_per_block_min, sites_per_block_max, mean_change_vs_prior) |>
+  print(n = 100)
 
 # ------------------------------------------------------------------------------
 # Per-site presence
@@ -397,7 +476,17 @@ zero_spans <- section_year |>
             location_code = NA_character_,
             detail = paste0("rm ", rm_lower, "-", rm_upper))
 
-anomalies <- bind_rows(case_anomalies, split_sections, zero_spans)
+# The capture is otherwise consistent: "Site" rows are Index, "Section" rows
+# are Census. A row breaking that pairing means a block is being treated as an
+# index location or vice versa, which crosses the two count types `b` relates.
+type_mismatches <- lut |>
+  filter((location_type == "Site"    & survey_type != "Index") |
+         (location_type == "Section" & survey_type != "Census")) |>
+  transmute(anomaly = "location_type / survey_type mismatch", fishery_name,
+            section_num, water_body_code, location_code,
+            detail = paste0(location_type, " + ", survey_type))
+
+anomalies <- bind_rows(case_anomalies, type_mismatches, split_sections, zero_spans)
 if (nrow(anomalies) > 0) {
   write_csv(anomalies, file.path(OUT_DIR, "bss_b_lut_anomalies.csv"))
   cli::cli_alert_warning("{nrow(anomalies)} anomal{?y/ies} in the lookup:")
@@ -436,7 +525,7 @@ fig9 <- site_grid |>
   scale_fill_gradientn(colours = SEQ_RAMP, name = "Section", breaks = scales::breaks_width(2)) +
   labs(
     title = "Which survey sites each fishery used, by year",
-    subtitle = "A gap is a site added or dropped. A row that stays filled but changes colour is a site kept and re-assigned to a different section -- the footprint held, the grouping moved.",
+    subtitle = "A gap is a site added or dropped. A row that stays filled but changes colour is a site kept and re-blocked -- its index count is now paired with a different census total.",
     x = NULL, y = NULL
   ) +
   theme_bss() +
@@ -469,7 +558,7 @@ fig10 <- turnover |>
   ) +
   labs(
     title = "Site turnover against the prior year",
-    subtitle = "Retained sites are the fishery's continuity. A year that is mostly grey covered the same water as the one before it, whatever happened to the section numbering.",
+    subtitle = "Retained sites are the fishery's continuity. A year that is mostly grey looked at the same places as the one before it -- read it with the block density below, which can move even when every site is kept.",
     x = NULL, y = "Sites"
   ) +
   theme_bss() +
@@ -492,8 +581,8 @@ fig11 <- section_year |>
   facet_wrap(~fishery_type, scales = "free_y", ncol = 2) +
   scale_fill_gradientn(colours = SEQ_RAMP, name = "Sites") +
   labs(
-    title = "How sites were grouped into sections, by year",
-    subtitle = "Supporting view. A change here without a matching change in site persistence is a re-drawn boundary, not a change in the water fished.",
+    title = "How sites were blocked into sections, by year",
+    subtitle = "Sections are the estimation unit: a census count totals the whole block and is paired with an index count of its sites. A change here moves the coverage ratio b absorbs, even when every site is kept.",
     x = NULL, y = NULL
   ) +
   theme_bss() +
@@ -501,6 +590,34 @@ fig11 <- section_year |>
 
 save_fig(fig11, "fig11_lut_section_year", width = 12, height = 10)
 cli::cli_alert_success("Wrote fig11_lut_section_year.")
+
+# ------------------------------------------------------------------------------
+# Fig 12 -- index sites per census block
+# ------------------------------------------------------------------------------
+# The `b`-relevant view. Each point is one block; the vertical spread within a
+# year is how unevenly the index sites are distributed across the blocks a
+# single `b` has to cover. A year where the spread widens is a year where one
+# scalar fits the fishery less well, regardless of what happened to the sites.
+
+fig12 <- index_density |>
+  ggplot(aes(x = factor(year), y = n_index_sites)) +
+  geom_line(aes(group = 1), data = ~ .x |> group_by(fishery_type, year) |>
+              summarise(n_index_sites = mean(n_index_sites), .groups = "drop"),
+            colour = INK_MUTED, linewidth = 0.6) +
+  geom_point(aes(colour = water_body_code), size = 2.4,
+             position = position_jitter(width = 0.12, height = 0, seed = 1)) +
+  facet_wrap(~fishery_type, scales = "free_y", ncol = 3) +
+  scale_colour_manual(values = WB_COLORS, name = NULL) +
+  labs(
+    title = "Index sites per census block",
+    subtitle = "One point per block; the grey line is the fishery's mean. A census count totals the whole block, an index count sees only its sites -- so the spread here is the range of coverage a single b has to average over.",
+    x = NULL, y = "Index sites in block"
+  ) +
+  theme_bss() +
+  theme(legend.position = "top")
+
+save_fig(fig12, "fig12_lut_index_density", width = 12, height = 7)
+cli::cli_alert_success("Wrote fig12_lut_index_density.")
 
 # ------------------------------------------------------------------------------
 # gt rendering
