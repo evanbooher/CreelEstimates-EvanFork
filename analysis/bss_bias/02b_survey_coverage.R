@@ -530,6 +530,11 @@ plot_calendar <- function(df, ftype) {
     mutate(
       # The fishery name is in the title; repeating the basin in every row
       # label costs a third of the plot width.
+      #
+      # Ordered on SECTION NUMBER, not water body. Sections run downstream to
+      # upstream, so the number is the spatial order; sorting by water body
+      # first scatters them -- 2023 Snohomish reads Skykomish s3, Snohomish s1,
+      # Snohomish s2 down the panel. fct_rev puts s1 at the top.
       section_label = fct_rev(fct_inorder(paste0(
         str_remove(water_body, "^[A-Za-z]+ - "), "  s", section_num
       )))
@@ -563,7 +568,9 @@ plot_calendar <- function(df, ftype) {
 }
 
 for (ft in sort(unique(survey_days$fishery_type))) {
-  df <- survey_days |> filter(fishery_type == ft) |> arrange(water_body, section_num)
+  # section_num first: fct_inorder() inside plot_calendar takes its level order
+  # from this arrange, and the section number is the spatial order.
+  df <- survey_days |> filter(fishery_type == ft) |> arrange(section_num, water_body)
   # Height from the TOTAL rows across years, since space = "free_y" makes each
   # panel proportional rather than equal.
   n_rows <- df |> distinct(year, water_body, section_num) |> nrow()

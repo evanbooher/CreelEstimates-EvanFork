@@ -964,6 +964,9 @@ cli::cli_alert_success("Wrote fig10_lut_site_turnover.")
 # a change here with no change there is a re-grouping, not a footprint change.
 
 fig11 <- section_year |>
+  # Section number, not water body: sections run downstream to upstream, so the
+  # number is the spatial order and sorting by water body first scatters them.
+  arrange(section_num, water_body_code) |>
   mutate(row_label = fct_rev(fct_inorder(paste0(water_body_code, "  s", section_num)))) |>
   ggplot(aes(x = factor(year), y = row_label, fill = n_locations)) +
   geom_tile(colour = SURFACE, linewidth = 1.2) +
