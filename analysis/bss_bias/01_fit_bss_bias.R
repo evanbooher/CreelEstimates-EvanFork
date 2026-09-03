@@ -530,18 +530,16 @@ fishery_target_catch_group <- function(fishery_name) {
 #    resolved per fishery-year from the committed location lookup, so this stays
 #    reproducible on the no-VPN path.
 #
-# 2. INDEXING (SECTION_RESTRICTIONS). prep_inputs_bss() sizes the Stan arrays
-#    with length(unique(section_num)) but indexes them with the RAW
-#    section_num, so any gap reads out of range. Stillaguamish carries sections
-#    1-6 and 8, with no 7.
-#
-#    NOTE, unresolved: 1-6 is not fork-aligned. Stillaguamish sections span the
-#    mainstem, North Fork and South Fork, and where the forks fall in the
-#    numbering moves between years -- so 1-6 drops the South Fork and NF
-#    section 7 in 2022, drops only the South Fork in 2024, and does nothing at
-#    all in 2023 or 2025 (whose numbering never exceeds 5). That is not a
-#    constant footprint across years, and a fork-based rule under (1) would be.
-#    Left as specified rather than changed unilaterally.
+# 2. INDEXING (SECTION_RESTRICTIONS). Kept as a mechanism, currently EMPTY.
+#    prep_inputs_bss() sizes the Stan arrays with length(unique(section_num))
+#    but indexes them with the RAW section_num, so any gap reads out of range.
+#    Stillaguamish was held to 1-6 for that reason -- a stop-gap to get the
+#    model running, not a scope decision with a basis. It has been removed:
+#    align_bss_sections() now closes numbering gaps properly by renumbering to
+#    a dense 1..S, and the Stillaguamish comparability question is answered by
+#    a fork rule under (1), which 1-6 did not do (it dropped the South Fork and
+#    NF section 7 in 2022, only the South Fork in 2024, and nothing at all in
+#    2023 or 2025).
 #
 # Both are SCOPE DECISIONS: the excluded water is gone from the fit entirely, so
 # the resulting `b` describes the retained reach only. The ledger records the
@@ -549,12 +547,23 @@ fishery_target_catch_group <- function(fishery_name) {
 # fix for the indexing bug -- that is align_bss_sections(), which runs
 # afterwards and handles the gaps these restrictions do not.
 
-SECTION_RESTRICTIONS <- list(
-  list(pattern = regex("Stillaguamish", ignore_case = TRUE), sections = 1:6)
-)
+# Empty on purpose -- see (2) above. Add an entry only for a numbering problem
+# align_bss_sections() genuinely cannot resolve, never for scope.
+SECTION_RESTRICTIONS <- list()
 
+# Each entry holds a fishery's series to the water bodies present in EVERY year
+# of it, so `b` averages over a constant set of water:
+#
+#   Skagit fall salmon       -- Cascade appears in 2025 only.
+#   Skagit spring Chinook upper -- Cascade appears in 2024 and 2025 only.
+#   Stillaguamish            -- mainstem and North Fork are in all four years;
+#                               the South Fork is in 2022, 2023 and 2024 but
+#                               not 2025. MS + NF is the largest constant set.
 WATER_BODY_RESTRICTIONS <- list(
-  list(pattern = regex("Skagit fall salmon", ignore_case = TRUE), keep = "Skagit")
+  list(pattern = regex("Skagit fall salmon", ignore_case = TRUE), keep = "Skagit"),
+  list(pattern = regex("Skagit spring Chinook.*upper", ignore_case = TRUE), keep = "Skagit"),
+  list(pattern = regex("Stillaguamish", ignore_case = TRUE),
+       keep = c("Stillaguamish - MS", "Stillaguamish - NF"))
 )
 
 # Committed by 00c_probe_location_lut.R. Read lazily and cached: a fishery-name
@@ -598,7 +607,28 @@ sections_in_water_bodies <- function(fishery_name, keep) {
   if (length(dropped) > 0) {
     cli::cli_alert_info("  Water-body scope: keeping {.val {keep}}, dropping {.val {dropped}}.")
   }
-  sort(unique(as.double(kept$section_num)))
+
+  keep_sections <- sort(unique(as.double(kept$section_num)))
+
+  # A restriction expressed in water bodies has to be APPLIED in section
+  # numbers, and a section can straddle two water bodies -- Stillaguamish
+  # 2023-24 section 5 is on both the North and South Forks. Keeping that
+  # section therefore keeps some of the water the rule meant to drop. Say so:
+  # the restriction is partial for that fishery-year, and a `b` from it is not
+  # quite the clean comparison the rule was written to produce.
+  bleed <- rows |>
+    dplyr::filter(as.double(.data$section_num) %in% keep_sections,
+                  !.data$water_body_code %in% keep) |>
+    dplyr::distinct(section_num, water_body_code)
+  if (nrow(bleed) > 0) {
+    cli::cli_alert_warning(
+      "  Restriction is PARTIAL: kept section{?s} {.val {sort(unique(bleed$section_num))}} \\
+       also carr{?ies/y} {.val {sort(unique(bleed$water_body_code))}}, which cannot be \\
+       separated by section number."
+    )
+  }
+
+  keep_sections
 }
 
 # The two rule sets COMPOSE: a fishery matching both is held to the
@@ -729,10 +759,12 @@ recode_angler_final_int <- function(d, table_name) {
 #   3. census_expan covers the same sections as effort_census, in the same
 #      order, or p_TI's columns are misaligned with the section they price.
 #
-# Restricting Stillaguamish to 1-6 fixes only the "8" half of condition 2. It
-# does nothing when the census counts themselves skip a section inside 1-6, or
-# when census_expan (built from location_type == "Site" rows) covers a
-# different set than effort_census.
+# A water-body restriction can leave the surviving numbers with gaps too --
+# Stillaguamish 2024-25 starts at section 2, and dropping the South Fork leaves
+# 2-6 -- and it does nothing at all when the census counts themselves skip a
+# section, or when census_expan (built from location_type == "Site" rows)
+# covers a different set than effort_census. Those are this function's job, not
+# the restriction's.
 #
 # align_bss_sections() enforces all three: it keeps the sections that have BOTH
 # census effort counts and a p_census entry, drops the rest, and renumbers what
