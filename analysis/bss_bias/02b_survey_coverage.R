@@ -56,6 +56,8 @@
 #   bss_b_survey_by_fishery.csv     -- per fishery-year: days surveyed, tie-in days, coverage
 #   bss_b_survey_by_section.csv     -- per fishery-year x section: first/last survey, spread
 #   bss_b_survey_date_match.csv     -- per fishery x month-day x section: which years surveyed it
+#   bss_b_common_window_cost.csv    -- the window all years share, and the tie-in days a refit there costs
+#   bss_b_parity_confound.csv       -- whether pink parity is separable from window start, per fishery
 #   figures/fig13_survey_calendar.{png,pdf}
 #   figures/fig14_season_ramp.{png,pdf}
 #   figures/fig15_tie_in_days.{png,pdf}
@@ -320,6 +322,91 @@ date_match |>
   count(fishery_type, agreement) |>
   pivot_wider(names_from = agreement, values_from = n, values_fill = 0) |>
   print()
+
+# ------------------------------------------------------------------------------
+# The common window, and what restricting to it would cost
+# ------------------------------------------------------------------------------
+# `b` is a SINGLE POOLED SCALAR -- vector[G] b, no day or section index -- so it
+# is an effort-weighted average of the day-and-section ratios inside whatever
+# window the fishery-year ran. Two years with different windows therefore
+# average over different periods, and a difference between their `b` values is
+# not attributable to anything else about those years.
+#
+# That bites hardest on the pink-year question. In Skagit fall salmon the odd
+# (pink) years start mid-August and the even years start 1 September, so parity
+# and window start are perfectly aligned across the five years available. The
+# same holds for Snohomish. Odd-year `b` averages in ~2.5 weeks that even-year
+# `b` never sees -- weeks with different species composition, a different
+# spatial spread of effort, and fewer sections open. A pink-vs-even difference
+# in `b` cannot be separated from that.
+#
+# Note this is NOT the "pink years have more effort" objection. `b` multiplies
+# the expected count given latent effort, so a uniform change in effort leaves
+# it untouched. `b` moves when effort redistributes relative to the index
+# sites -- which is a real and plausible pink mechanism, and exactly the one
+# the window confound would masquerade as.
+#
+# The common window is the intersection of every year's window for a fishery,
+# on day-of-year. Refitting there is the test that separates the two. This
+# table is what that test would cost in the currency that matters: paired
+# index + census days.
+
+common_window <- survey_days |>
+  group_by(fishery_type, year) |>
+  summarise(doy_start = min(as.integer(format(event_date, "%j"))),
+            doy_end   = max(as.integer(format(event_date, "%j"))), .groups = "drop") |>
+  group_by(fishery_type) |>
+  summarise(common_doy_start = max(doy_start),
+            common_doy_end   = min(doy_end), .groups = "drop") |>
+  mutate(common_n_days = common_doy_end - common_doy_start + 1,
+         common_start = format(as.Date(common_doy_start - 1, origin = "2001-01-01"), "%b %d"),
+         common_end   = format(as.Date(common_doy_end   - 1, origin = "2001-01-01"), "%b %d"))
+
+common_window_cost <- survey_days |>
+  mutate(doy = as.integer(format(event_date, "%j"))) |>
+  left_join(common_window, by = "fishery_type") |>
+  mutate(in_common = doy >= common_doy_start & doy <= common_doy_end) |>
+  group_by(fishery_type, year, common_start, common_end, common_n_days) |>
+  summarise(
+    n_days_window     = n_distinct(event_date),
+    tie_in_days_all   = n_distinct(event_date[tie_in_day]),
+    tie_in_days_common = n_distinct(event_date[tie_in_day & in_common]),
+    .groups = "drop"
+  ) |>
+  mutate(tie_in_days_lost = tie_in_days_all - tie_in_days_common,
+         parity = year_parity_label(year)) |>
+  arrange(fishery_type, year)
+
+write_csv(common_window_cost, file.path(OUT_DIR, "bss_b_common_window_cost.csv"))
+cli::cli_alert_success("Wrote bss_b_common_window_cost.csv.")
+
+cli::cli_h2("Common window across years, and the tie-in days a refit there would cost")
+common_window_cost |>
+  select(fishery_type, year, parity, common_start, common_end,
+         n_days_window, tie_in_days_all, tie_in_days_common, tie_in_days_lost) |>
+  print(n = 40)
+
+# Is parity confounded with window start? Where every odd year starts earlier
+# than every even year, the two cannot be told apart with these data.
+parity_confound <- survey_days |>
+  group_by(fishery_type, year) |>
+  summarise(doy_start = min(as.integer(format(event_date, "%j"))), .groups = "drop") |>
+  mutate(parity = year_parity_label(year)) |>
+  group_by(fishery_type) |>
+  summarise(
+    odd_starts  = paste(sort(doy_start[parity == "odd (pink)"]), collapse = ","),
+    even_starts = paste(sort(doy_start[parity == "even"]), collapse = ","),
+    separable = !(all(doy_start[parity == "odd (pink)"] < min(doy_start[parity == "even"])) |
+                  all(doy_start[parity == "odd (pink)"] > max(doy_start[parity == "even"]))),
+    .groups = "drop"
+  ) |>
+  mutate(verdict = if_else(separable,
+                           "start dates overlap -- parity is separable",
+                           "every odd year starts on one side of every even year -- CONFOUNDED"))
+
+write_csv(parity_confound, file.path(OUT_DIR, "bss_b_parity_confound.csv"))
+cli::cli_h2("Is a pink-year effect separable from window start?")
+print(parity_confound, n = 20, width = Inf)
 
 # ==============================================================================
 # Figures
