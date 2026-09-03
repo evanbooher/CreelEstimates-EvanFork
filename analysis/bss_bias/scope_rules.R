@@ -116,9 +116,10 @@ WATER_BODY_RESTRICTIONS <- list(
 #                     pattern = regex("Stillaguamish", ignore_case = TRUE),
 #                     keep    = "Stillaguamish - MS")
 #
-# EXPECT FEWER OBSERVATIONS. `b` is informed only by section-days carrying both
-# an index and a census count -- 2 to 6 per year for the whole Stillaguamish
-# basin -- and a fork-only scope keeps a fraction of those. Read
+# EXPECT FEWER ANCHORS. Census counts set the scale of the latent effort that
+# index counts are measured against, and are recorded only alongside a same-day
+# index count in the same section -- 2 to 6 such days per year for the whole
+# Stillaguamish basin, and a fork-only scope keeps a fraction of those. Read
 # prior_contraction in bss_b_summary.csv before drawing anything from the
 # result: a fork-scoped `b` may be mostly prior.
 #

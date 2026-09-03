@@ -23,14 +23,15 @@
 #                     section-block, scheduled against an index count.
 #   INTERVIEWS     -- dwg$interview. Can occur anywhere in the block.
 #
-#   `b` is the ratio linking an index count to the census count it is paired
-#   with, and it is a single pooled scalar (vector[G] b in the Stan model, no
-#   section index). So the quantity that actually informs `b` is not "was this
-#   section surveyed" but "did this section-day carry BOTH an index and a
-#   census count". That is the tie_in_day flag, and it is the headline here
-#   rather than a derived afterthought: a fishery-year with plenty of survey
-#   days but few paired ones has a weakly-informed `b` however busy its
-#   calendar looks.
+#   `b` is a single pooled scalar (vector[G] b in the Stan model, no section
+#   index) carried by the index-count likelihood and NOT by the census one, so
+#   the census counts are what set the scale of the latent effort the index
+#   counts are compared against. Since a census count is dropped unless an
+#   index count exists for the same section on the same day, the tie_in_day
+#   flag is effectively the count of census ANCHORS -- and it is the headline
+#   here rather than a derived afterthought: a fishery-year with plenty of
+#   survey days but few paired ones has little pinning `b` down, however busy
+#   its calendar looks.
 #
 # ------------------------------------------------------------------------------
 # TWO THINGS THIS TABLE IS CAREFUL ABOUT
@@ -593,9 +594,13 @@ cli::cli_alert_success("Wrote fig14_season_ramp.")
 # ------------------------------------------------------------------------------
 # Fig 15 -- paired index+census days
 # ------------------------------------------------------------------------------
-# The `b`-relevant summary. `b` is informed only by section-days carrying BOTH
-# an index and a census count, so this is the count of observations actually
-# behind each year's estimate -- which a survey-day total can overstate badly.
+# The `b`-relevant summary. Census counts are what set the scale of the latent
+# effort that index counts are compared against, and prep_dwg_effort_census()
+# drops a census count with no same-day index count in the same section -- so
+# this is effectively the number of census ANCHORS available to a year's
+# estimate. Index counts elsewhere in the section still contribute, through the
+# season-level effort mean they share, but with no census in a section there is
+# nothing to compare them against and `b` falls back on its prior.
 
 fig15 <- survey_days |>
   filter(tie_in_day) |>
@@ -607,7 +612,7 @@ fig15 <- survey_days |>
   scale_fill_manual(values = WB_COLORS_SURVEY, name = NULL) +
   labs(
     title = "Paired index + census days, the observations behind b",
-    subtitle = "b is informed only by section-days carrying both an index count and the census count it pairs with. A year with many survey days but few paired ones has a weakly-informed b.",
+    subtitle = "Census counts set the scale of the effort that index counts are measured against, and are recorded only alongside a same-day index count. A year with many survey days but few paired ones has few anchors for b.",
     x = NULL, y = "Section-days with both counts"
   ) +
   theme_bss() +

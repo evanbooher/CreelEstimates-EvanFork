@@ -179,8 +179,8 @@ make_b_series_fig <- function(plot_df, param_label, y_lab) {
         " | prior: lognormal(0, ", unique(b_summary$prior_sigma)[1], ") | est_cg: fixed per-fishery-name target ",
         "(Chinook/Coho/Sockeye harvest -- see README.md's Catch-group selection).\n",
         "Marker shape encodes comparability tier (see Figure 2 / bss_b_comparability.csv) -- open circle = not-comparable, x = not-estimable.\n",
-        "Marker AREA encodes the paired index+census section-days behind the estimate (bss_b_survey_by_fishery.csv). `b` is a single pooled scalar, ",
-        "so it is informed only by days carrying BOTH counts -- a small marker is an estimate resting on very few observations."
+        "Marker AREA encodes the paired index+census section-days behind the estimate (bss_b_survey_by_fishery.csv). Census counts set the scale of the effort ",
+        "that index counts are measured against, so a small marker is an estimate with few anchors -- and with none, `b` falls back on its prior."
       )
     ) +
     theme_bss() +

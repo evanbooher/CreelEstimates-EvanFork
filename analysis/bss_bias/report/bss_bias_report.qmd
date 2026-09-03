@@ -102,7 +102,7 @@ The model predicts how many vehicles the index count *should* see, from two
 things it estimates separately:
 
 - **angler effort** — how many anglers were present in that section at that
-  count, scaled by how much of the section the count covers (`p_TI`)
+  count
 - **vehicles per angler** (`R_V`) — estimated from the interviews, where each
   interviewed group reports how many anglers it had (`A_A`) and how many
   vehicles it brought (`V_A`)
@@ -111,8 +111,22 @@ things it estimates separately:
 recorded:
 
 $$
-b_1 \;=\; \frac{\text{vehicles actually counted}}{\text{anglers present} \;\times\; \text{section coverage} \;\times\; \text{vehicles per angler}}
+b_1 \;=\; \frac{\text{vehicles actually counted}}{\text{anglers present} \;\times\; \text{vehicles per angler}}
 $$
+
+::: {.callout-note collapse="true"}
+## One term left out of that formula
+The model also carries `p_TI` — the proportion of a section a census count
+covers — in that denominator. It is omitted here because **`p_TI` is 1 for
+every gear and section in these fisheries**: the location lookup holds a single
+distinct `p_census` value, and `prep_dwg_census_expan()` fills the missing ones
+with 1. The term is inert, so the formula above is what `b` actually reduces to.
+
+Worth stating plainly because the two are easy to conflate: **`b` is not
+`p_TI`.** `p_TI` is a known spatial-coverage expansion applied to the census
+count; `b` is an estimated discrepancy in the index count that remains after
+effort and vehicles-per-angler are accounted for.
+:::
 
 So `b = 1` means the index count is exactly what angler effort and the
 interviews say it should be. `b[2]` is the same quantity for trailer counts,
@@ -126,6 +140,56 @@ using trailers per angler (`R_T`).
 Note that `b` is **not** "anglers per vehicle" — that is `R_V`, and it is
 estimated separately. `b` is only the leftover discrepancy after `R_V` has
 been accounted for.
+
+### Where the number comes from
+
+"Anglers present" is not observed. It is a latent quantity the model
+estimates, and understanding what pins it down is what makes a `b` of 0.8
+readable as different from a `b` of 1.4.
+
+Two count types enter the model differently:
+
+| | what the model says |
+|---|---|
+| **census (tie-in)** | `E_s ~ Poisson(λ · p_TI)` — counts everything in the block, and carries **no `b`** |
+| **vehicle index** | `V_I ~ Poisson(λ · p_TI · R_V · b₁)` — counts at sites, and carries `b₁` |
+
+`λ` is the same latent effort in both. So **the census counts are what set the
+scale of `λ`, and `b` is the factor the index counts need on top of it.** With
+no census counts in a section, `λ` and `b` trade off freely — the model cannot
+tell a busy section from a high-reading index count — and only the prior
+separates them.
+
+That contrast is **not day-by-day**. Effort is a structured process, not a free
+parameter per day:
+
+$$
+\lambda_{s,d,g} \;=\; \exp\!\big(\mu_{g,s} \;+\; \omega_{g,s,d} \;+\; \beta\,w_d\big)\times O_{s,d}
+$$
+
+where $\mu_{g,s}$ is a **section-level mean shared across the whole season** and
+$\omega$ follows a day-to-day AR(1). A census count on one day therefore
+constrains effort on neighbouring days too, and every index count in that
+section contributes to `b` through the shared level. What the paired days
+supply is the **census anchor**: census counts are scheduled against index
+counts and are dropped if they have no same-day index count in the same
+section, so the paired-day count in §5 is effectively the number of census
+observations available to set `λ`.
+
+Three consequences worth carrying to the figures:
+
+1. **`b` is a ratio, so it does not respond to how much effort there was.**
+   Double the anglers and both `λ` and the counts double; `b` is unchanged. A
+   year-to-year change in `b` is a change in the *relationship* between index
+   counts and effort — where people parked relative to the counted sites — not
+   a change in how busy the river was. This bears directly on §3: a pink-year
+   effect on `b` would have to come from effort redistributing, not from there
+   being more of it.
+2. **One `b` covers every section and day in a fishery-year**, so it is an
+   effort-weighted average of whatever the true ratio was across them. Blocks
+   holding 1 index site and blocks holding 9 are averaged together.
+3. **Few census anchors means a prior-driven `b`.** `prior_contraction` in §1
+   is the direct check, and it should be read before quoting any number.
 
 ::: {.callout-note}
 ## Why `b` needs interviews to exist at all
@@ -398,10 +462,14 @@ comparable at all. Two things decide that, and they are not the same:
 - **what the survey record actually holds** — the days worked, and among those,
   the days carrying *both* an index count and the census count it pairs with.
 
-The last of those is the one that governs `b`. `b` is a single pooled scalar
-(`vector[G] b` in the Stan model, with no section or day index), so it is
-informed **only** by section-days holding both counts — not by every surveyed
-day, and not at all by the size of the defined footprint.
+The last of those is what anchors `b`. Census counts are what set the scale of
+the latent effort the index counts are compared against, and they are dropped
+unless an index count exists for the same section on the same day — so the
+paired-day count is effectively the number of census observations available.
+Index counts elsewhere in the section still contribute, through the
+season-level effort mean they share (see [Where the number comes
+from](#where-the-number-comes-from)), but with no census in a section there is
+nothing to compare them against and `b` falls back on its prior.
 
 ```{r}
 #| results: asis
@@ -433,10 +501,12 @@ if (!is.null(composition)) {
 
 Two consequences worth carrying into every number above.
 
-**The evidence behind `b` is thinner than the survey record suggests.** Skagit
-fall salmon surveyed 50 days in 2024 and produced 7 paired ones; Stillaguamish
-surveyed 33 days in 2022-23 for 2. The markers in Figures 1 and 1b are sized by
-this count, so a point resting on almost nothing looks like it.
+**The census anchors are far fewer than the survey days.** Skagit fall salmon
+surveyed 50 days in 2024 and produced 7 paired ones; Stillaguamish surveyed 33
+days in 2022-23 for 2. Those index-count days are not wasted — they inform `b`
+through the shared section effort level — but the paired days are what set the
+scale they are measured against. The markers in Figures 1 and 1b are sized by
+this count.
 
 **Estimation windows are not stable across years.** Skagit fall salmon has run
 91–140 days, Snohomish fall salmon 33–91, and Stillaguamish 2023-24 was 12 days
