@@ -102,7 +102,11 @@ TIER_SHAPES <- c(
 coverage_path <- file.path(OUT_DIR, "bss_b_survey_by_fishery.csv")
 coverage <- if (file.exists(coverage_path)) {
   read_csv(coverage_path, show_col_types = FALSE) |>
-    select(fishery_name, n_days_tie_in, n_days_surveyed, n_days_window)
+    # SECTION-days, not dates. Census counts anchor the effort level per
+    # section, so a date on which eight sections were censused is eight
+    # anchors, not one -- Stillaguamish 2022-23 has 2 census dates but 11
+    # census section-days, and sizing on dates understates it fivefold.
+    select(fishery_name, n_sd_tie_in, n_days_tie_in, n_days_surveyed, n_days_window)
 } else {
   cli::cli_alert_warning(
     "{.file {basename(coverage_path)}} not found -- run 02b_survey_coverage.R to \\
@@ -124,7 +128,7 @@ build_bias_plot_df <- function(bias_type_val) {
       target_species = target_species_from_est_cg(est_cg)
     )
   if (!is.null(coverage)) out <- left_join(out, coverage, by = "fishery_name")
-  if (!"n_days_tie_in" %in% names(out)) out$n_days_tie_in <- NA_integer_
+  if (!"n_sd_tie_in" %in% names(out)) out$n_sd_tie_in <- NA_integer_
   out
 }
 
@@ -160,7 +164,7 @@ make_b_series_fig <- function(plot_df, param_label, y_lab) {
     geom_segment(aes(xend = year_start, y = q2.5, yend = q97.5), linewidth = 0.5, alpha = 0.55, lineend = "round") +
     geom_segment(aes(xend = year_start, y = q10, yend = q90), linewidth = 1.4, lineend = "round") +
     geom_line(linewidth = 0.6, alpha = 0.7) +
-    geom_point(aes(shape = comparability_tier, fill = fishery_type, size = n_days_tie_in),
+    geom_point(aes(shape = comparability_tier, fill = fishery_type, size = n_sd_tie_in),
                stroke = 1) +
     scale_color_manual(values = series_colors, name = "Fishery") +
     scale_fill_manual(values = series_colors, guide = "none") +
@@ -168,7 +172,7 @@ make_b_series_fig <- function(plot_df, param_label, y_lab) {
     # Area, not radius, so a point twice the size reads as twice the evidence.
     # The floor keeps a 2-day point visible rather than vanishing -- the point
     # is that it IS an estimate, just one resting on almost nothing.
-    scale_size_area(max_size = 7, name = "Paired index+census days") +
+    scale_size_area(max_size = 7, name = "Census-anchored section-days") +
     facet_wrap(~ basin, ncol = 1, scales = "free_y") +
     labs(
       title = paste0("BSS ", param_label, " across years"),
@@ -179,8 +183,8 @@ make_b_series_fig <- function(plot_df, param_label, y_lab) {
         " | prior: lognormal(0, ", unique(b_summary$prior_sigma)[1], ") | est_cg: fixed per-fishery-name target ",
         "(Chinook/Coho/Sockeye harvest -- see README.md's Catch-group selection).\n",
         "Marker shape encodes comparability tier (see Figure 2 / bss_b_comparability.csv) -- open circle = not-comparable, x = not-estimable.\n",
-        "Marker AREA encodes the paired index+census section-days behind the estimate (bss_b_survey_by_fishery.csv). Census counts set the scale of the effort ",
-        "that index counts are measured against, so a small marker is an estimate with few anchors -- and with none, `b` falls back on its prior."
+        "Marker AREA encodes the census-anchored SECTION-days behind the estimate (n_sd_tie_in in bss_b_survey_by_fishery.csv) -- section-days rather than dates, ",
+        "since a census count anchors the effort level of the section it covers. A small marker is an estimate with few anchors; with none, `b` falls back on its prior."
       )
     ) +
     theme_bss() +

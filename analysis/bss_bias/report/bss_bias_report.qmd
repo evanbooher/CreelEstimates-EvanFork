@@ -479,7 +479,7 @@ comparable at all. Two things decide that, and they are not the same:
 The last of those is what anchors `b`. Census counts are what set the scale of
 the latent effort the index counts are compared against, and they are dropped
 unless an index count exists for the same section on the same day — so the
-paired-day count is effectively the number of census observations available.
+census section-day count is effectively the number of anchors available.
 Index counts elsewhere in the section still contribute, through the
 season-level effort mean they share (see [Where the number comes
 from](#where-the-number-comes-from)), but with no census in a section there is
@@ -515,12 +515,18 @@ if (!is.null(composition)) {
 
 Two consequences worth carrying into every number above.
 
-**The census anchors are far fewer than the survey days.** Skagit fall salmon
-surveyed 50 days in 2024 and produced 7 paired ones; Stillaguamish surveyed 33
-days in 2022-23 for 2. Those index-count days are not wasted — they inform `b`
-through the shared section effort level — but the paired days are what set the
-scale they are measured against. The markers in Figures 1 and 1b are sized by
-this count.
+**The census anchors are far fewer than the survey days, and they cluster.**
+Stillaguamish 2022-23 ran 91 days and surveyed 33 of them, but its census
+counts fall on **two dates** — 1 September, mainstem only, and 17 September,
+covering sections 1–8. Every North Fork and South Fork section's effort level
+for that whole season therefore rests on a single day. Those index-count days
+are not wasted, since they inform $b$ through the shared section effort level,
+but the census days are what set the scale they are measured against.
+
+Two units are reported and they differ sharply: **census dates** says how often
+anyone went out, **census section-days** says how many section effort levels
+got anchored. Stillaguamish 2022-23 is 2 and 11. Figures 1 and 1b size their
+markers on the section-day count.
 
 **Estimation windows are not stable across years.** Skagit fall salmon has run
 91–140 days, Snohomish fall salmon 33–91, and Stillaguamish 2023-24 was 12 days

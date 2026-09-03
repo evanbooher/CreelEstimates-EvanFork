@@ -358,8 +358,12 @@ lut_defined <- if (file.exists(LUT_PATH)) {
     )
 } else NULL
 
+# Both units, because they answer different questions and differ a lot: census
+# dates say how often anyone went out to census, census section-days say how
+# many section effort levels got anchored. Stillaguamish 2022-23 is 2 and 11.
 composition <- by_fishery |>
-  select(fishery_type, year, n_days_window, n_sections, n_days_surveyed, n_days_tie_in) |>
+  select(fishery_type, year, n_days_window, n_sections, n_days_surveyed,
+         n_days_tie_in, n_sd_tie_in) |>
   rename(sections_surveyed = n_sections)
 
 if (!is.null(lut_defined)) {
@@ -386,11 +390,13 @@ if (requireNamespace("gt", quietly = TRUE) && !is.null(lut_defined)) {
       subtitle = "Defined comes from the location lookup, surveyed from the effort and interview record. The last column is what informs b."
     ) |>
     gt::tab_spanner("Defined", columns = c(water_bodies, sections_defined, index_sites_defined)) |>
-    gt::tab_spanner("Surveyed", columns = c(n_days_window, sections_surveyed, n_days_surveyed, n_days_tie_in)) |>
+    gt::tab_spanner("Surveyed", columns = c(n_days_window, sections_surveyed, n_days_surveyed,
+                                            n_days_tie_in, n_sd_tie_in)) |>
     gt::cols_label(water_bodies = "Water", sections_defined = "Sections",
                    index_sites_defined = "Index sites", n_days_window = "Window days",
                    sections_surveyed = "Sections", n_days_surveyed = "Days surveyed",
-                   n_days_tie_in = "Paired index+census days", parity = "Year") |>
+                   n_days_tie_in = "Census dates", n_sd_tie_in = "Census section-days",
+                   parity = "Year") |>
     gt::opt_row_striping()
   gt::gtsave(gt_comp, file.path(OUT_DIR, "bss_b_fishery_composition.html"))
   cli::cli_alert_success("Wrote bss_b_fishery_composition.html")
@@ -674,14 +680,14 @@ cli::cli_alert_success("Wrote fig15_tie_in_days.")
 # says what it is.
 #
 # The rows run from what was planned to what the estimate rests on:
-#   sections defined -> sections surveyed -> days surveyed -> paired days.
+#   sections defined -> sections surveyed -> days surveyed -> census section-days.
 # A gap opening between consecutive rows is where a plan stopped becoming data.
 
 MEASURE_LEVELS <- c(
-  "Sections defined"          = "sections_defined",
-  "Sections surveyed"         = "sections_surveyed",
-  "Days surveyed"             = "n_days_surveyed",
-  "Paired index+census days"  = "n_days_tie_in"
+  "Sections defined"        = "sections_defined",
+  "Sections surveyed"       = "sections_surveyed",
+  "Days surveyed"           = "n_days_surveyed",
+  "Census section-days"     = "n_sd_tie_in"
 )
 have <- MEASURE_LEVELS[MEASURE_LEVELS %in% names(composition)]
 
