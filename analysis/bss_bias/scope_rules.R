@@ -60,16 +60,37 @@ SECTION_RESTRICTIONS <- list()
 # Each entry holds a fishery's series to the water bodies present in EVERY year
 # of it, so `b` averages over a constant set of water:
 #
-#   Skagit fall salmon       -- Cascade appears in 2025 only.
+#   Skagit fall salmon          -- Cascade appears in 2025 only.
 #   Skagit spring Chinook upper -- Cascade appears in 2024 and 2025 only.
-#   Stillaguamish            -- mainstem and North Fork are in all four years;
-#                               the South Fork is in 2022, 2023 and 2024 but
-#                               not 2025. MS + NF is the largest constant set.
+#
+# STILLAGUAMISH IS DELIBERATELY UNRESTRICTED, though its South Fork is present
+# in 2022, 2023 and 2024 and absent in 2025. An MS + NF rule was tried and
+# removed: it could not be applied evenly. The rule resolves to section
+# numbers, and 2023-24 merges the North and South Forks into a single census
+# block (section 5), so that year kept five South Fork index sites while 2022
+# and 2024 lost theirs. A rule that excludes the South Fork from two years and
+# retains it in a third creates the comparability break it exists to prevent.
+#
+# Nor can it be fixed by dropping those five sites: section 5's census count
+# totals both forks, so index counts covering only the North Fork against a
+# census covering both would be absorbed by `b` as a low bias. That is a
+# corrupted estimate, not a restricted one.
+#
+# So all four years run whole-basin, and the 2025 South Fork absence is a
+# STATED LIMITATION rather than an unevenly-applied rule. See
+# bss_b_lut_scope_effect.csv and bss_b_lut_water_body_year.csv for what each
+# year actually covers.
+#
+# FOLLOW-UP, not yet built: fork-specific `b` -- a mainstem-only and a
+# North-Fork-only estimate -- is the scope that matches the proposed fishery
+# (North Fork gamefish, mainstem coho). It needs more than a rule here, because
+# every output is keyed on fishery_name and a second scope for the same
+# fishery-year would overwrite the first. The contained way in is a run-level
+# scope tag that suffixes the output key, so "Stillaguamish ... 2024-25" and
+# "Stillaguamish ... 2024-25 [MS]" coexist in the ledger and the b summary.
 WATER_BODY_RESTRICTIONS <- list(
   list(pattern = regex("Skagit fall salmon", ignore_case = TRUE), keep = "Skagit"),
-  list(pattern = regex("Skagit spring Chinook.*upper", ignore_case = TRUE), keep = "Skagit"),
-  list(pattern = regex("Stillaguamish", ignore_case = TRUE),
-       keep = c("Stillaguamish - MS", "Stillaguamish - NF"))
+  list(pattern = regex("Skagit spring Chinook.*upper", ignore_case = TRUE), keep = "Skagit")
 )
 
 # Committed by 00c_probe_location_lut.R. Read lazily and cached: a fishery-name
