@@ -126,12 +126,19 @@ survey_grid_for <- function(fishery_name) {
   })
   if (is.null(dwg)) return(NULL)
 
-  in_window <- function(d) {
-    if (is.null(d) || nrow(d) == 0 || !"event_date" %in% names(d)) return(d[0, , drop = FALSE])
+  # Every zero-row path has to return the SAME COLUMNS as the populated one.
+  # A tibble that is merely empty still joins and filters correctly; one that is
+  # missing a column fails later, far from here, on whatever first refers to it.
+  EFF_COLS <- tibble(event_date = as.Date(character()), section_num = double(),
+                     tie_in_indicator = double())
+  INT_COLS <- tibble(event_date = as.Date(character()), section_num = double())
+
+  in_window <- function(d, template) {
+    if (is.null(d) || nrow(d) == 0 || !all(names(template) %in% names(d))) return(template)
     d |> filter(between(event_date, d_start, d_end))
   }
-  eff <- in_window(dwg$effort)
-  int <- in_window(dwg$interview)
+  eff <- in_window(dwg$effort, EFF_COLS)
+  int <- in_window(dwg$interview, INT_COLS)
 
   # Sections from the UNION of every table that names one, so a section that
   # was surveyed but never defined (or vice versa) still appears as a row.
@@ -143,9 +150,12 @@ survey_grid_for <- function(fishery_name) {
     return(NULL)
   }
 
+  # recorded_closed must be present in BOTH branches: without it the empty case
+  # joins in no such column and the `open` mutate below has nothing to coalesce.
   closures <- dwg$closures
   closed <- if (is.null(closures) || nrow(closures) == 0) {
-    tibble(section_num = double(), event_date = as.Date(character()))
+    tibble(section_num = double(), event_date = as.Date(character()),
+           recorded_closed = logical())
   } else {
     closures |>
       mutate(event_date = as.Date(substr(as.character(event_date), 1, 10)),
