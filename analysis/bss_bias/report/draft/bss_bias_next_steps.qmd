@@ -95,7 +95,7 @@ if (!is.null(T2)) {
     filter(!is.na(pi_lb)) |>
     transmute(
       Basin = basin, Fishery = fishery_type, Likelihood = bias_type,
-      `N yrs` = n_years,
+      `Yrs used` = n_years_used,
       b = round(pooled_b, 3),
       `PI lo` = round(pi_lb, 3), `PI hi` = round(pi_ub, 3),
       `PI / CI width` = round(pi_width_ratio, 2),

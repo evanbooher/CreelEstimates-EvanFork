@@ -43,7 +43,7 @@
 #      trailer index counts still yields a b[2] posterior, it just reproduces
 #      the prior. A tight tau^2 across such years is the prior talking, not
 #      evidence of a stable bias term. Every table below therefore reports
-#      n_informed alongside n_years, and T2 carries an informed-only
+#      n_informed alongside the year counts, and T2 carries an informed-only
 #      sensitivity column. Read those before quoting a b[2] number.
 #
 # [V4] The PINK-YEAR analysis (T3, Figure 7) uses only the FALL-TIMED
@@ -128,8 +128,42 @@ dat <- b_summary |>
     vi       = se_log^2,
     informed = !is.na(prior_contraction) & prior_contraction >= INFORMED_MIN_CONTRACTION &
                  (is.na(informed_flag) | informed_flag != "unconverged")
-  ) |>
-  filter(!is.na(log_b), is.finite(log_b), !is.na(vi), is.finite(vi), vi > 0)
+  )
+
+# Which rows the model can use, and WHY each of the others cannot. Previously
+# this was a bare filter() and the count that survived it was then reported as
+# "N yrs" -- so a series with five fitted years showed 2, and the three that
+# vanished left no trace. A row that cannot enter the model is a fact about the
+# series, not an absence.
+dat <- dat |>
+  mutate(exclusion = case_when(
+    is.na(median) | median <= 0            ~ "no usable posterior median",
+    is.na(log_b) | !is.finite(log_b)       ~ "log(b) not finite",
+    is.na(sd)                              ~ "no posterior SD",
+    is.na(vi) | !is.finite(vi) | vi <= 0   ~ "sampling variance zero or not finite",
+    TRUE                                   ~ NA_character_
+  ))
+
+excluded <- dat |> filter(!is.na(exclusion))
+if (nrow(excluded) > 0) {
+  excluded |>
+    select(fishery_name, bias_type, exclusion, median, sd, prior_contraction, informed_flag) |>
+    arrange(bias_type, fishery_name) |>
+    write_csv(file.path(OUT_DIR, "bss_b_T2_excluded.csv"))
+  cli::cli_alert_warning(
+    "{nrow(excluded)} fishery-year estimate(s) cannot enter the variability model:"
+  )
+  excluded |> count(bias_type, exclusion) |> print()
+  cli::cli_alert_info("Named in {.file bss_b_T2_excluded.csv}.")
+}
+
+# Years the series HAS an estimate for, independent of whether the model can
+# use it -- so the table can report both, and the gap between them.
+series_years_available <- dat |>
+  group_by(basin, fishery_type, bias_type) |>
+  summarise(n_years_available = n_distinct(year_start), .groups = "drop")
+
+dat <- dat |> filter(is.na(exclusion))
 
 if (!is.null(INCLUDE_TIERS)) {
   n_before <- nrow(dat)
@@ -239,9 +273,11 @@ cli::cli_alert_success("T1 written ({nrow(T1)} rows).")
 # ------------------------------------------------------------------------------
 
 fit_series <- function(df, label) {
+  # Rows entering the model, NOT the number of years the series has -- those
+  # differ whenever an estimate is unusable, and the table reports both.
   n_years <- nrow(df)
   base <- tibble(
-    n_years      = n_years,
+    n_years_used = n_years,
     n_informed   = sum(df$informed),
     mean_b       = exp(mean(df$log_b)),
     sd_log_b_raw = if (n_years > 1) sd(df$log_b) else NA_real_
@@ -294,7 +330,17 @@ T2 <- model_dat |>
   group_by(basin, fishery_type, bias_type) |>
   group_modify(~ fit_series(.x, .y)) |>
   ungroup() |>
+  left_join(series_years_available, by = c("basin", "fishery_type", "bias_type")) |>
+  mutate(n_years_unusable = n_years_available - n_years_used) |>
+  relocate(n_years_available, n_years_used, n_years_unusable, .after = bias_type) |>
   arrange(bias_type, basin, fishery_type)
+
+if (any(T2$n_years_unusable > 0, na.rm = TRUE)) {
+  cli::cli_alert_warning("Series where the model uses fewer years than the fishery has:")
+  T2 |> filter(n_years_unusable > 0) |>
+    select(fishery_type, bias_type, n_years_available, n_years_used, n_years_unusable) |>
+    print(n = 30)
+}
 
 write_csv(T2, file.path(OUT_DIR, "bss_b_T2_variability.csv"))
 
@@ -302,14 +348,15 @@ T2 |>
   mutate(across(c(mean_b, tau, pooled_b, ci_lb, ci_ub, pi_lb, pi_ub, pi_width_ratio,
                   tau2, tau2_informed_only), ~ round(.x, 3)),
          I2 = round(I2, 1), Q_p = signif(Q_p, 3)) |>
-  select(basin, fishery_type, bias_type, n_years, n_informed, pooled_b,
+  select(basin, fishery_type, bias_type, n_years_available, n_years_used, n_informed, pooled_b,
          ci_lb, ci_ub, pi_lb, pi_ub, tau, I2, Q_p, tau2_informed_only) |>
   gt(groupname_col = "bias_type") |>
   tab_header(title = "T2. Interannual variability in b, and the predictive distribution for a new year",
              subtitle = "tau = SD of true year-to-year variation, after removing each estimate's own uncertainty.") |>
   tab_spanner(label = "Series mean (95% CI)", columns = c(pooled_b, ci_lb, ci_ub)) |>
   tab_spanner(label = "Prediction interval for a NEW year", columns = c(pi_lb, pi_ub)) |>
-  cols_label(fishery_type = "Fishery", bias_type = "Likelihood", n_years = "N yrs",
+  cols_label(fishery_type = "Fishery", bias_type = "Likelihood",
+             n_years_available = "Yrs with an estimate", n_years_used = "Yrs used",
              n_informed = "N informed", pooled_b = "b", ci_lb = "lo", ci_ub = "hi",
              pi_lb = "lo", pi_ub = "hi", Q_p = "Q p",
              tau2_informed_only = "tau² (informed only)") |>
