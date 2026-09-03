@@ -80,6 +80,7 @@
 #   bss_b_lut_core_sites.csv        -- sites present in every year, and whether their block held
 #   bss_b_lut_block_year_over_year.csv -- census blocks added/dropped between consecutive years
 #   bss_b_lut_scope_effect.csv      -- defined vs fitted scope per fishery-year, and what was excluded
+#   bss_b_lut_site_series_summary.csv -- core vs union sites, permanent departures vs skipped years
 #   bss_b_lut_location_changes.csv  -- per site: years present, persistent/added/dropped/intermittent
 #   bss_b_lut_section_year.csv      -- fishery_type x year x water body x section
 #   bss_b_lut_water_body_year.csv   -- fishery_type x year x water body
@@ -463,12 +464,30 @@ year_pairs <- site_year_section |>
   ungroup() |>
   filter(!is.na(prev_year))
 
+# A consecutive-year diff alone OVER-COUNTS a temporary contraction. Skagit
+# fall salmon dropped 8 upper-river sites in 2024 and restored 7 of them in
+# 2025: read pair by pair that is "8 dropped" then "7 added", which sounds like
+# a program in flux, when it is one year's contraction reversed. Only ONE site
+# actually left for good.
+#
+# So each arrival and departure is classified against the fishery's WHOLE
+# history, not just the adjacent year:
+#   new       -- never present before
+#   returning -- present in an earlier year, absent, now back
+#   permanent -- gone and never returns
+#   temporary -- absent this year, present again later
 describe_pair <- function(ftype, y_prev, y_now) {
-  prev <- site_year_section |> filter(fishery_type == ftype, year == y_prev)
-  now  <- site_year_section |> filter(fishery_type == ftype, year == y_now)
+  hist <- site_year_section |> filter(fishery_type == ftype)
+  prev <- hist |> filter(year == y_prev)
+  now  <- hist |> filter(year == y_now)
 
-  added   <- now  |> filter(!location_id %in% prev$location_id)
-  dropped <- prev |> filter(!location_id %in% now$location_id)
+  seen_before <- hist |> filter(year < y_prev)  |> pull(location_id) |> unique()
+  seen_after  <- hist |> filter(year > y_now)   |> pull(location_id) |> unique()
+
+  added   <- now  |> filter(!location_id %in% prev$location_id) |>
+    mutate(kind = if_else(location_id %in% seen_before, "returning", "new"))
+  dropped <- prev |> filter(!location_id %in% now$location_id) |>
+    mutate(kind = if_else(location_id %in% seen_after, "temporary", "permanent"))
   # A site in both years whose block assignment differs: kept, re-blocked.
   moved <- now |>
     inner_join(prev, by = c("location_id", "location_code"), suffix = c("_now", "_prev")) |>
@@ -491,17 +510,25 @@ describe_pair <- function(ftype, y_prev, y_now) {
     year           = y_now,
     n_retained     = nrow(now) - nrow(added),
     n_added        = nrow(added),
+    n_added_new       = sum(added$kind == "new"),
+    n_added_returning = sum(added$kind == "returning"),
     n_dropped      = nrow(dropped),
+    n_dropped_permanent = sum(dropped$kind == "permanent"),
+    n_dropped_temporary = sum(dropped$kind == "temporary"),
     n_moved_block  = nrow(moved),
-    sites_added    = paste(sort(added$location_code),   collapse = "; "),
-    sites_dropped  = paste(sort(dropped$location_code), collapse = "; "),
+    sites_added    = paste(sort(paste0(added$location_code, " [", added$kind, "]")), collapse = "; "),
+    sites_dropped  = paste(sort(paste0(dropped$location_code, " [", dropped$kind, "]")), collapse = "; "),
     sites_moved    = paste(sort(paste0(moved$location_code, " (", moved$assigned_prev,
                                        " -> ", moved$assigned_now, ")")), collapse = "; "),
     blocks_added   = paste(setdiff(sec_now, sec_prev), collapse = "; "),
     blocks_dropped = paste(setdiff(sec_prev, sec_now), collapse = "; "),
+    # The verdict reads NET-OF-REVERSAL change: a site that leaves and comes
+    # back has not changed the fishery, it has interrupted it for a year.
     verdict = dplyr::case_when(
       nrow(added) == 0 & nrow(dropped) == 0 & nrow(moved) == 0 ~ "identical construction",
       nrow(added) == 0 & nrow(dropped) == 0                    ~ "same sites, re-blocked",
+      sum(added$kind == "new") == 0 &
+        sum(dropped$kind == "permanent") == 0                  ~ "temporary contraction or restoration",
       nrow(moved) == 0                                         ~ "sites changed, blocking held",
       TRUE                                                     ~ "sites changed and re-blocked"
     )
@@ -520,6 +547,39 @@ cli::cli_h2("Year-over-year construction")
 year_over_year |>
   select(fishery_type, year_prev, year, n_retained, n_added, n_dropped, n_moved_block, verdict) |>
   print(n = 60)
+
+# ------------------------------------------------------------------------------
+# Net site stability over the whole series
+# ------------------------------------------------------------------------------
+# The answer that survives temporary contractions. Core = present in every
+# year. Union = every site the fishery ever used. Sites that left for good and
+# sites that ever skipped a year are counted separately, because "the program
+# stopped surveying here" and "one lean season" are different facts.
+
+# Reuses location_changes' classification rather than re-deriving it, so the
+# two cannot disagree about what "dropped" means:
+#   persistent   -- every year
+#   dropped      -- present from the start, then gone and never back
+#   added        -- arrived partway and stayed
+#   intermittent -- skipped at least one year and returned
+site_series_summary <- location_changes |>
+  group_by(basin, fishery_type) |>
+  summarise(
+    n_years         = first(n_years_fishery),
+    core_all_years  = sum(status == "persistent"),
+    union_ever_used = n(),
+    left_for_good   = sum(status == "dropped"),
+    arrived_later   = sum(status == "added"),
+    skipped_a_year  = sum(status == "intermittent"),
+    core_pct_of_union = round(100 * sum(status == "persistent") / n(), 1),
+    .groups = "drop"
+  )
+
+write_csv(site_series_summary, file.path(OUT_DIR, "bss_b_lut_site_series_summary.csv"))
+cli::cli_alert_success("Wrote bss_b_lut_site_series_summary.csv.")
+
+cli::cli_h2("Net site stability across the whole series")
+print(site_series_summary |> select(-basin), n = 20)
 
 # ------------------------------------------------------------------------------
 # Census blocks, year over year
