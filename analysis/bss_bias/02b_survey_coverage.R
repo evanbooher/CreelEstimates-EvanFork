@@ -225,6 +225,11 @@ survey_days <- survey_days |>
     fishery_type = fishery_type_from_name(fishery_name),
     year         = as.integer(str_extract(fishery_name, "\\d{4}")),
     month_day    = format(event_date, "%m-%d"),
+    # Day of year, so years stack on one axis. Guarded against a window that
+    # crosses 31 December -- none currently do, but a wrapped doy would fold
+    # January back before September and silently scramble the panel.
+    doy          = as.integer(format(event_date, "%j")),
+    doy          = if (max(doy) - min(doy) > 300) if_else(doy < 100L, doy + 365L, doy) else doy,
     # Day of season, so a fishery whose window shifts between years can still
     # be compared on "how far into the season are we".
     day_of_season = as.integer(event_date - min(event_date)) + 1L,
@@ -419,10 +424,11 @@ if (requireNamespace("gt", quietly = TRUE) && !is.null(lut_defined)) {
 # table is what that test would cost in the currency that matters: paired
 # index + census days.
 
+# survey_days$doy, not a fresh format() call -- that column carries the
+# year-boundary guard and these must agree with the calendar figure.
 common_window <- survey_days |>
   group_by(fishery_type, year) |>
-  summarise(doy_start = min(as.integer(format(event_date, "%j"))),
-            doy_end   = max(as.integer(format(event_date, "%j"))), .groups = "drop") |>
+  summarise(doy_start = min(doy), doy_end = max(doy), .groups = "drop") |>
   group_by(fishery_type) |>
   summarise(common_doy_start = max(doy_start),
             common_doy_end   = min(doy_end), .groups = "drop") |>
@@ -431,7 +437,6 @@ common_window <- survey_days |>
          common_end   = format(as.Date(common_doy_end   - 1, origin = "2001-01-01"), "%b %d"))
 
 common_window_cost <- survey_days |>
-  mutate(doy = as.integer(format(event_date, "%j"))) |>
   left_join(common_window, by = "fishery_type") |>
   mutate(in_common = doy >= common_doy_start & doy <= common_doy_end) |>
   group_by(fishery_type, year, common_start, common_end, common_n_days) |>
@@ -458,7 +463,7 @@ common_window_cost |>
 # than every even year, the two cannot be told apart with these data.
 parity_confound <- survey_days |>
   group_by(fishery_type, year) |>
-  summarise(doy_start = min(as.integer(format(event_date, "%j"))), .groups = "drop") |>
+  summarise(doy_start = min(doy), .groups = "drop") |>
   mutate(parity = year_parity_label(year)) |>
   group_by(fishery_type) |>
   summarise(
@@ -486,12 +491,15 @@ print(parity_confound, n = 20, width = Inf)
 # nobody worked, a day worked but not paired, and a paired day.
 STATUS_LEVELS <- c("closed", "open, no survey", "interviews only",
                    "census only", "index only", "index + census")
+# Two neutrals for the states with no survey, then four hues in an order the
+# palette validator passes at every adjacent pair -- the previous version put
+# CAT yellow next to STATUS warning, two yellows a reader cannot separate.
 STATUS_COLORS <- c(
   "closed"          = GRID_COLOR,
   "open, no survey" = BASELINE_COL,
-  "interviews only" = STATUS[["warning"]],
+  "interviews only" = CAT[["violet"]],
   "census only"     = CAT[["orange"]],
-  "index only"      = CAT[["yellow"]],
+  "index only"      = CAT[["aqua"]],
   "index + census"  = CAT[["blue"]]
 )
 
@@ -510,30 +518,58 @@ WB_COLORS_SURVEY <- setNames(rep_len(unname(CAT), length(WB_LEVELS)), WB_LEVELS)
 # blank and fills in later opened later. Reading down the panels of one fishery
 # compares years on the same calendar axis.
 
+# Day of year on the x axis, not calendar date: on a date axis the four
+# Stillaguamish seasons occupy four thin slivers of a 2022-2025 span, and the
+# whole point is to compare them. Stacked on day of year they sit directly
+# above one another.
+doy_label <- function(x) format(as.Date(x - 1, origin = "2001-01-01"), "%b %d")
+
 plot_calendar <- function(df, ftype) {
+  rng <- range(df$doy)
   df |>
-    mutate(section_label = fct_rev(fct_inorder(paste0(water_body, "  s", section_num)))) |>
-    ggplot(aes(x = event_date, y = section_label, fill = status)) +
-    geom_tile(colour = NA) +
-    facet_wrap(~year, ncol = 1, scales = "free_y", strip.position = "right") +
+    mutate(
+      # The fishery name is in the title; repeating the basin in every row
+      # label costs a third of the plot width.
+      section_label = fct_rev(fct_inorder(paste0(
+        str_remove(water_body, "^[A-Za-z]+ - "), "  s", section_num
+      )))
+    ) |>
+    ggplot(aes(x = doy, y = section_label, fill = status)) +
+    geom_tile() +
+    # space = "free_y" so a year with 3 sections gets a third the height of one
+    # with 9, instead of the same band padded out with whitespace.
+    facet_grid(year ~ ., scales = "free_y", space = "free_y", switch = "y") +
     scale_fill_manual(values = STATUS_COLORS, drop = FALSE, name = NULL) +
-    scale_x_date(date_labels = "%b %d", date_breaks = "2 weeks") +
+    scale_x_continuous(
+      limits = rng, expand = c(0, 0),
+      breaks = scales::breaks_width(14), labels = doy_label
+    ) +
+    scale_y_discrete(expand = c(0, 0)) +
     labs(
       title = paste0(ftype, ": what was surveyed, by date and section"),
-      subtitle = "Each row is a section, each column a day of the estimation window. A row that starts blank and fills in later is a section that opened later. 'Index + census' is the pairing that informs b.",
+      subtitle = "Years stacked on a shared day-of-year axis. A row that starts blank and fills in later is a section that opened later; 'index + census' is the pairing that anchors b.",
       x = NULL, y = NULL
     ) +
     theme_bss() +
-    theme(panel.grid = element_blank(), legend.position = "top",
-          axis.text.y = element_text(size = 7))
+    theme(
+      panel.grid = element_blank(),
+      panel.spacing.y = unit(3, "pt"),
+      legend.position = "top",
+      legend.key.size = unit(10, "pt"),
+      strip.placement = "outside",
+      axis.text.y = element_text(size = 7),
+      axis.text.x = element_text(size = 8)
+    )
 }
 
 for (ft in sort(unique(survey_days$fishery_type))) {
   df <- survey_days |> filter(fishery_type == ft) |> arrange(water_body, section_num)
+  # Height from the TOTAL rows across years, since space = "free_y" makes each
+  # panel proportional rather than equal.
   n_rows <- df |> distinct(year, water_body, section_num) |> nrow()
   save_fig(plot_calendar(df, ft),
            paste0("fig13_survey_calendar_", safe_name(ft)),
-           width = 13, height = max(5, 0.30 * n_rows + 2))
+           width = 11, height = max(4, 0.22 * n_rows + 1.8))
 }
 cli::cli_alert_success("Wrote fig13_survey_calendar_* ({n_distinct(survey_days$fishery_type)} fisheries).")
 
