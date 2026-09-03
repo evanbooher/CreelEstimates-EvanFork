@@ -90,8 +90,29 @@ TIER_SHAPES <- c(
 # (trailer) below.
 # ------------------------------------------------------------------------------
 
+# Paired index + census days per fishery-year, from 02b_survey_coverage.R.
+# `b` is informed ONLY by section-days carrying both counts, so this is the
+# observation count behind each estimate -- and it is small and uneven: 7 to 18
+# for Skagit fall salmon, 2 to 6 for Stillaguamish. A credible interval already
+# widens when the data are thin, but a reader comparing points across years
+# cannot see WHY one is wide without this, and a point resting on 2 paired days
+# should not look like one resting on 18.
+#
+# Optional: 03 still runs without 02b having been run, just without the encoding.
+coverage_path <- file.path(OUT_DIR, "bss_b_survey_by_fishery.csv")
+coverage <- if (file.exists(coverage_path)) {
+  read_csv(coverage_path, show_col_types = FALSE) |>
+    select(fishery_name, n_days_tie_in, n_days_surveyed, n_days_window)
+} else {
+  cli::cli_alert_warning(
+    "{.file {basename(coverage_path)}} not found -- run 02b_survey_coverage.R to \\
+     size points by the paired index+census days behind each estimate."
+  )
+  NULL
+}
+
 build_bias_plot_df <- function(bias_type_val) {
-  b_summary |>
+  out <- b_summary |>
     filter(bias_type == bias_type_val) |>
     left_join(
       comp |> select(fishery_name, basin, fishery_label, fishery_type, season_label, year_start, comparability_tier),
@@ -102,6 +123,9 @@ build_bias_plot_df <- function(bias_type_val) {
       basin = factor(basin, levels = c("Skagit", "Snohomish", "Stillaguamish")),
       target_species = target_species_from_est_cg(est_cg)
     )
+  if (!is.null(coverage)) out <- left_join(out, coverage, by = "fishery_name")
+  if (!"n_days_tie_in" %in% names(out)) out$n_days_tie_in <- NA_integer_
+  out
 }
 
 plot_df <- build_bias_plot_df("vehicle")
@@ -136,10 +160,15 @@ make_b_series_fig <- function(plot_df, param_label, y_lab) {
     geom_segment(aes(xend = year_start, y = q2.5, yend = q97.5), linewidth = 0.5, alpha = 0.55, lineend = "round") +
     geom_segment(aes(xend = year_start, y = q10, yend = q90), linewidth = 1.4, lineend = "round") +
     geom_line(linewidth = 0.6, alpha = 0.7) +
-    geom_point(aes(shape = comparability_tier, fill = fishery_type), size = 3, stroke = 1) +
+    geom_point(aes(shape = comparability_tier, fill = fishery_type, size = n_days_tie_in),
+               stroke = 1) +
     scale_color_manual(values = series_colors, name = "Fishery") +
     scale_fill_manual(values = series_colors, guide = "none") +
     scale_shape_manual(values = TIER_SHAPES, name = "Comparability tier") +
+    # Area, not radius, so a point twice the size reads as twice the evidence.
+    # The floor keeps a 2-day point visible rather than vanishing -- the point
+    # is that it IS an estimate, just one resting on almost nothing.
+    scale_size_area(max_size = 7, name = "Paired index+census days") +
     facet_wrap(~ basin, ncol = 1, scales = "free_y") +
     labs(
       title = paste0("BSS ", param_label, " across years"),
@@ -149,7 +178,9 @@ make_b_series_fig <- function(plot_df, param_label, y_lab) {
         "Model: ", unique(b_summary$model_file)[1], " | fit config: ", unique(b_summary$fit_config)[1],
         " | prior: lognormal(0, ", unique(b_summary$prior_sigma)[1], ") | est_cg: fixed per-fishery-name target ",
         "(Chinook/Coho/Sockeye harvest -- see README.md's Catch-group selection).\n",
-        "Marker shape encodes comparability tier (see Figure 2 / bss_b_comparability.csv) -- open circle = not-comparable, x = not-estimable."
+        "Marker shape encodes comparability tier (see Figure 2 / bss_b_comparability.csv) -- open circle = not-comparable, x = not-estimable.\n",
+        "Marker AREA encodes the paired index+census section-days behind the estimate (bss_b_survey_by_fishery.csv). `b` is a single pooled scalar, ",
+        "so it is informed only by days carrying BOTH counts -- a small marker is an estimate resting on very few observations."
       )
     ) +
     theme_bss() +
