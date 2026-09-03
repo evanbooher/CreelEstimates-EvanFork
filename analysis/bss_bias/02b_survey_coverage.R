@@ -199,13 +199,19 @@ survey_grid_for <- function(fishery_name) {
       # The quantity that actually informs `b`: an index count and the census
       # count it pairs with, in the same block on the same day.
       tie_in_day = n_index_counts > 0 & n_census_counts > 0,
+      has_interviews = n_interviews > 0,
+      # Interviews are reported SEPARATELY from the count state rather than
+      # being swallowed by it. The earlier ordering put `n_index_counts > 0`
+      # ahead of `n_interviews > 0`, so "index only" silently meant "index,
+      # with or without interviews" -- and interviews are what pin R_V, which
+      # is what lets `b` be separated from it at all.
       status = case_when(
-        !open                                    ~ "closed",
-        tie_in_day                               ~ "index + census",
-        n_index_counts  > 0                      ~ "index only",
-        n_census_counts > 0                      ~ "census only",
-        n_interviews    > 0                      ~ "interviews only",
-        TRUE                                     ~ "open, no survey"
+        !open                ~ "closed",
+        tie_in_day           ~ "index + census",
+        n_index_counts  > 0  ~ "index",
+        n_census_counts > 0  ~ "census only",
+        n_interviews    > 0  ~ "interviews only",
+        TRUE                 ~ "open, no survey"
       )
     ) |>
     select(-recorded_closed)
@@ -256,6 +262,12 @@ by_fishery <- survey_days |>
     n_section_days    = n(),
     n_sd_surveyed     = sum(surveyed),
     n_sd_tie_in       = sum(tie_in_day),
+    # How often an index count came with interviews -- interviews pin R_V, and
+    # a fishery-year short on them has `b` and R_V less well separated.
+    n_sd_index               = sum(n_index_counts > 0),
+    n_sd_index_with_intervw  = sum(n_index_counts > 0 & n_interviews > 0),
+    pct_index_with_intervw   = round(100 * sum(n_index_counts > 0 & n_interviews > 0) /
+                                       pmax(sum(n_index_counts > 0), 1), 1),
     n_sd_closed       = sum(!open),
     pct_days_surveyed = round(100 * n_distinct(event_date[surveyed]) / n_distinct(event_date), 1),
     pct_sd_tie_in     = round(100 * sum(tie_in_day) / n(), 1),
@@ -267,7 +279,12 @@ write_csv(by_fishery, file.path(OUT_DIR, "bss_b_survey_by_fishery.csv"))
 cli::cli_h2("Coverage per fishery-year")
 by_fishery |>
   select(fishery_type, year, n_days_window, n_sections, n_days_surveyed,
-         n_days_tie_in, pct_days_surveyed, pct_sd_tie_in) |>
+         n_days_tie_in, n_sd_tie_in, pct_days_surveyed, pct_sd_tie_in) |>
+  print(n = 100)
+
+cli::cli_h2("Do index counts come with interviews?")
+by_fishery |>
+  select(fishery_type, year, n_sd_index, n_sd_index_with_intervw, pct_index_with_intervw) |>
   print(n = 100)
 
 # ------------------------------------------------------------------------------
@@ -548,8 +565,14 @@ print(parity_confound, n = 20, width = Inf)
 # figure that uses it carries a legend, since a state must never be read from
 # colour alone. The order runs worst-to-best for `b`: a closed day, an open day
 # nobody worked, a day worked but not paired, and a paired day.
+# Ordered worst-to-best for `b`. Interviews are NOT folded into these: they are
+# a second, binary dimension, and putting them on the fill needs eight hues off
+# a six-hue ramp -- the palette validator fails it on the lightness band and the
+# normal-vision floor whichever way the shades are stepped. They get their own
+# channel below instead, which is also what keeps a state from being carried by
+# colour alone.
 STATUS_LEVELS <- c("closed", "open, no survey", "interviews only",
-                   "census only", "index only", "index + census")
+                   "census only", "index", "index + census")
 # Two neutrals for the states with no survey, then four hues in an order the
 # palette validator passes at every adjacent pair -- the previous version put
 # CAT yellow next to STATUS warning, two yellows a reader cannot separate.
@@ -558,7 +581,7 @@ STATUS_COLORS <- c(
   "open, no survey" = BASELINE_COL,
   "interviews only" = CAT[["violet"]],
   "census only"     = CAT[["orange"]],
-  "index only"      = CAT[["aqua"]],
+  "index"           = CAT[["aqua"]],
   "index + census"  = CAT[["blue"]]
 )
 
@@ -600,6 +623,15 @@ plot_calendar <- function(df, ftype) {
     ) |>
     ggplot(aes(x = doy, y = section_label, fill = status)) +
     geom_tile() +
+    # Interviews as a second channel rather than a seventh and eighth fill.
+    # An index count says how many vehicles were there; the interviews on the
+    # same day are what pin R_V, and without them `b` and R_V are less well
+    # separated. A day with counts but no interviews is a real gap and should
+    # be visible as one.
+    geom_point(aes(shape = "interviews taken"),
+               data = ~ dplyr::filter(.x, has_interviews),
+               size = 0.55, colour = INK, alpha = 0.75, show.legend = TRUE) +
+    scale_shape_manual(values = c("interviews taken" = 16), name = NULL) +
     # space = "free_y" so a year with 3 sections gets a third the height of one
     # with 9, instead of the same band padded out with whitespace.
     facet_grid(year ~ ., scales = "free_y", space = "free_y", switch = "y") +
@@ -624,6 +656,7 @@ plot_calendar <- function(df, ftype) {
       panel.grid = element_blank(),
       panel.spacing.y = unit(3, "pt"),
       legend.position = "top",
+      legend.box = "horizontal",
       legend.key.size = unit(10, "pt"),
       strip.placement = "outside",
       axis.text.y = element_text(size = 7),
