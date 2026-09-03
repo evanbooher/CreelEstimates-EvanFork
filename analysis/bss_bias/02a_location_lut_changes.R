@@ -64,6 +64,7 @@
 #   bss_b_lut_site_moves.csv        -- sites kept but re-blocked, so paired with a different census count
 #   bss_b_lut_year_over_year.csv    -- NAMED diff between consecutive years: sites added, dropped, re-blocked
 #   bss_b_lut_core_sites.csv        -- sites present in every year, and whether their block held
+#   bss_b_lut_block_year_over_year.csv -- census blocks added/dropped between consecutive years
 #   bss_b_lut_location_changes.csv  -- per site: years present, persistent/added/dropped/intermittent
 #   bss_b_lut_section_year.csv      -- fishery_type x year x water body x section
 #   bss_b_lut_water_body_year.csv   -- fishery_type x year x water body
@@ -149,9 +150,28 @@ finite_or_na <- function(x) if_else(is.finite(x), x, NA_real_)
 
 # location_id is the key, not location_code: 141 ids carry only 138 distinct
 # codes, so codes are not unique. Codes are for display.
-sites <- lut |>
-  distinct(basin = basin_of(fishery_type), fishery_type, year,
+#
+# INDEX SITES AND CENSUS BLOCKS ARE DIFFERENT THINGS and must not be pooled.
+# The lookup holds both: location_type "Site" rows are the discrete places
+# index counts happen, "Section" rows define the block a census count totals.
+# Counting them together makes a block being split look like sites arriving --
+# Skagit spring Chinook lower keeps the same eight index sites throughout while
+# its 2024 block split adds a census-block row, which pooled would read as
+# turnover in the water surveyed. It is not.
+#
+# So `sites` below is INDEX SITES ONLY, and every continuity measure built on
+# it is about the places index counts actually happen. Census-block changes are
+# reported separately, further down.
+all_locations <- lut |>
+  distinct(basin = basin_of(fishery_type), fishery_type, year, location_type,
            location_id, location_code, section_num, water_body_code, survey_type)
+
+sites <- all_locations |> filter(location_type == "Site")
+census_blocks <- all_locations |> filter(location_type == "Section")
+
+cli::cli_alert_info(
+  "{nrow(sites)} index-site rows and {nrow(census_blocks)} census-block rows."
+)
 
 # ==============================================================================
 # PRIMARY: is it the same set of sites?
@@ -419,6 +439,36 @@ cli::cli_h2("Year-over-year construction")
 year_over_year |>
   select(fishery_type, year_prev, year, n_retained, n_added, n_dropped, n_moved_block, verdict) |>
   print(n = 60)
+
+# ------------------------------------------------------------------------------
+# Census blocks, year over year
+# ------------------------------------------------------------------------------
+# The other half of the construction. A block appearing or disappearing changes
+# what a census count totals, and therefore the coverage ratio `b` absorbs --
+# independently of whether any index site moved.
+
+block_year_over_year <- census_blocks |>
+  group_by(basin, fishery_type, year) |>
+  summarise(blocks = list(sort(unique(paste0(water_body_code, " s", section_num)))),
+            n_blocks = n_distinct(paste(water_body_code, section_num)), .groups = "drop") |>
+  arrange(basin, fishery_type, year) |>
+  group_by(fishery_type) |>
+  mutate(prev_blocks = c(list(NULL), blocks[-n()]), prev_year = lag(year)) |>
+  ungroup() |>
+  filter(!is.na(prev_year)) |>
+  mutate(
+    n_added   = map2_int(blocks, prev_blocks, ~ length(setdiff(.x, .y))),
+    n_dropped = map2_int(blocks, prev_blocks, ~ length(setdiff(.y, .x))),
+    added     = map2_chr(blocks, prev_blocks, ~ paste(setdiff(.x, .y), collapse = "; ")),
+    dropped   = map2_chr(blocks, prev_blocks, ~ paste(setdiff(.y, .x), collapse = "; "))
+  ) |>
+  select(basin, fishery_type, prev_year, year, n_blocks, n_added, n_dropped, added, dropped)
+
+write_csv(block_year_over_year, file.path(OUT_DIR, "bss_b_lut_block_year_over_year.csv"))
+cli::cli_alert_success("Wrote bss_b_lut_block_year_over_year.csv.")
+
+cli::cli_h2("Census blocks, year over year")
+block_year_over_year |> select(-basin, -added, -dropped) |> print(n = 40)
 
 # ------------------------------------------------------------------------------
 # The constant core
