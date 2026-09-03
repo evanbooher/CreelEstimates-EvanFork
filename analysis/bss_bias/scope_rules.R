@@ -105,7 +105,7 @@ sections_in_water_bodies <- function(fishery_name, keep) {
   kept <- rows |> dplyr::filter(.data$water_body_code %in% keep)
   if (nrow(kept) == 0) {
     cli::cli_abort(
-      "{.val {fishery_name}} has no sections in water bod{?y/ies} {.val {keep}}; \\
+      "{.val {fishery_name}} has no sections in water bodies {.val {keep}}; \\
        restricting would leave nothing to fit."
     )
   }
@@ -127,10 +127,13 @@ sections_in_water_bodies <- function(fishery_name, keep) {
                   !.data$water_body_code %in% keep) |>
     dplyr::distinct(section_num, water_body_code)
   if (nrow(bleed) > 0) {
+    # Stated without cli pluralization: two {?} markers over two different
+    # quantities in one string is ambiguous, and cli errors rather than guessing.
+    bleed_sections <- sort(unique(bleed$section_num))
+    bleed_water    <- sort(unique(bleed$water_body_code))
     cli::cli_alert_warning(
-      "  Restriction is PARTIAL: kept section{?s} {.val {sort(unique(bleed$section_num))}} \\
-       also carr{?ies/y} {.val {sort(unique(bleed$water_body_code))}}, which cannot be \\
-       separated by section number."
+      "  Restriction is PARTIAL. Kept sections {.val {bleed_sections}} also carry \\
+       {.val {bleed_water}}, which cannot be separated by section number."
     )
   }
 
