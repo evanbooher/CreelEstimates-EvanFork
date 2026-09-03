@@ -552,7 +552,7 @@ plot_calendar <- function(df, ftype) {
     scale_y_discrete(expand = c(0, 0)) +
     labs(
       title = paste0(ftype, ": what was surveyed, by date and section"),
-      subtitle = "Years stacked on a shared day-of-year axis. A row that starts blank and fills in later is a section that opened later; 'index + census' is the pairing that anchors b.",
+      subtitle = "Fishery years stacked on a shared day-of-year axis. 'index + census' is pairing anchoring b term.",
       x = NULL, y = NULL
     ) +
     theme_bss() +
