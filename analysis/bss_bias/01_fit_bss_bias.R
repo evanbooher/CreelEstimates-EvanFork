@@ -108,94 +108,11 @@ dir.create(DRAWS_DIR, recursive = TRUE, showWarnings = FALSE)
 # Configuration -- read this before running
 # ------------------------------------------------------------------------------
 
-# DEFAULTS TO "external" (data.wa.gov) ON PURPOSE, not "internal": it makes
-# this entire analysis reproducible by anyone with the repo and plain
-# internet access -- no VPN, no WDFW DB credentials. Meeting participants
-# (DFW + tribal technical staff) can re-run start to finish and get the same
-# numbers, which is the difference between "here are my results" and "here
-# is the analysis." Verified equivalent for BSS input purposes in check 0.A
-# above. Switch to "internal" only if you specifically need DB-only data.
-DATA_SOURCE <- "external"
-
-# creelutils::fetch_data()'s documented conn = NULL auto-connect-when-internal
-# path does not work against the currently installed creelutils version --
-# confirmed locally: fetch_data(fishery_name=, data_source="internal") errors
-# "`conn` is required" even after a successful DB connection message. Fix:
-# open ONE connection here (matches the pattern in chore/multi-fishery-trip-
-# summary's multi_fishery_creel_summary.R) and pass it explicitly into every
-# fetch_data() call below, instead of reconnecting per fishery-year.
-DB_CONN <- if (identical(DATA_SOURCE, "internal")) {
-  cli::cli_alert_info("Connecting to internal DB...")
-  creelutils::connect_creel_db()
-} else {
-  NULL  # ignored by fetch_data() when data_source == "external"
-}
-
-# ------------------------------------------------------------------------------
-# Estimation window: the one remaining VPN-only dependency, and how an
-# external run gets around it.
-#
-# resolve_dates() reads creelutils::fishery_lut(), which is internal-DB only --
-# there is no data.wa.gov equivalent, and the public Socrata fishery registry
-# (vkjc-s5u8) carries fishery_name but no start/end dates. So under
-# DATA_SOURCE = "external" we read the windows captured by
-# 00b_capture_fishery_params.R instead of querying.
-#
-# That is not only a VPN workaround. resolve_dates() computes
-#   resolved_end = min(fishery_end_date, Sys.Date() - 1)
-# so for an IN-SEASON fishery the window depends on what day the script runs.
-# Reading a committed capture pins the window, making two runs on different
-# days comparable -- which the live lookup cannot guarantee.
-# ------------------------------------------------------------------------------
-
-FISHERY_PARAMS_PATH <- here::here("analysis", "bss_bias", "lookup", "fishery_params.csv")
-
-FISHERY_PARAMS <- if (file.exists(FISHERY_PARAMS_PATH)) {
-  read_csv(FISHERY_PARAMS_PATH, show_col_types = FALSE)
-} else {
-  NULL
-}
-
-if (!identical(DATA_SOURCE, "internal")) {
-  if (is.null(FISHERY_PARAMS)) {
-    cli::cli_abort(c(
-      "DATA_SOURCE is {.val {DATA_SOURCE}} but {.file {FISHERY_PARAMS_PATH}} does not exist.",
-      "x" = "Estimation windows cannot be resolved without it (fishery_lut is VPN-only).",
-      "i" = "Run {.file analysis/bss_bias/00b_capture_fishery_params.R} once with VPN and commit the result,",
-      "i" = "or set {.code DATA_SOURCE <- \"internal\"} if you have DB access."
-    ))
-  }
-  cli::cli_alert_info(
-    "Using estimation windows captured {.val {FISHERY_PARAMS$captured_at[1]}} \\
-     ({nrow(FISHERY_PARAMS)} fishery-year(s)) -- no VPN required."
-  )
-}
-
-# Single entry point for "what window does this fishery-year use?", so the
-# internal and external paths cannot drift apart. Returns NULL (not an error)
-# when unresolvable; callers decide whether that is a skip.
-resolve_window <- function(fishery_name) {
-  if (identical(DATA_SOURCE, "internal")) {
-    return(tryCatch(resolve_dates(fishery_name, "", "", conn = DB_CONN), error = function(e) NULL))
-  }
-  row <- FISHERY_PARAMS |>
-    filter(fishery_name == .env$fishery_name, resolve_status == "ok")
-  if (nrow(row) != 1) return(NULL)
-  list(est_date_start = as.character(row$est_date_start[1]),
-       est_date_end   = as.character(row$est_date_end[1]))
-}
-
-# Message for the skip when resolve_window() comes back empty -- names the
-# actual remedy rather than just reporting the symptom.
-window_skip_reason <- function() {
-  if (identical(DATA_SOURCE, "internal")) {
-    "Could not resolve estimation window from fishery_lut."
-  } else {
-    paste0("No captured estimation window for this fishery in lookup/fishery_params.csv. ",
-           "Re-run 00b_capture_fishery_params.R with VPN to capture it, or set ",
-           "DATA_SOURCE <- \"internal\" if you have DB access.")
-  }
-}
+# The data layer -- DATA_SOURCE, DB_CONN, the estimation-window lookup, and
+# the cached fetch -- lives in fishery_data.R so that 02b_survey_coverage.R
+# reads exactly the same windows and the same tables. See that file for why
+# each piece is shaped the way it is.
+source(here::here("analysis", "bss_bias", "fishery_data.R"))
 
 # Standardize on ONE Stan model version for every fishery-year. `b`'s
 # declaration/prior/likelihood placement is identical across all four model
@@ -422,22 +339,6 @@ validate_days <- function(days, fishery_name) {
     )
   }
   invisible(TRUE)
-}
-
-safe_name <- function(x) stringr::str_replace_all(x, "[^[:alnum:]]", "_")
-
-# Coerce event_date to Date on every dwg table that has one, whatever the
-# fetch handed back (Date, POSIXct, character, or an untyped column from a
-# zero-row result). substr() to 10 characters first so an ISO timestamp
-# ("2021-05-19T00:00:00.000") parses as cleanly as a bare date; the whole
-# thing is a no-op on a column that is already Date.
-normalize_dwg_dates <- function(dwg) {
-  for (tbl in names(dwg)) {
-    if (is.data.frame(dwg[[tbl]]) && "event_date" %in% names(dwg[[tbl]])) {
-      dwg[[tbl]]$event_date <- as.Date(substr(as.character(dwg[[tbl]]$event_date), 1, 10))
-    }
-  }
-  dwg
 }
 
 # Upserts by fishery_name rather than blindly appending: a re-run of the same
@@ -867,19 +768,10 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   date_start <- suppressWarnings(as.Date(est_dates$est_date_start))
   date_end   <- suppressWarnings(as.Date(est_dates$est_date_end))
 
-  dwg <- run_stage("fetch_data", {
-    creelutils::fetch_data(conn = DB_CONN, fishery_name = fishery_name, data_source = DATA_SOURCE)
-  })
-
-  # The external (data.wa.gov) path does not reliably hand back event_date as a
-  # Date -- it can arrive as character, which then fails in between() with
-  # "Can't combine `x` <character> and `left` <date>". A table with ZERO rows
-  # does it too: no rows means no type to infer, and the error fires before
-  # preflight can reach its own "no interviews in the window" check, so a
-  # genuinely empty fishery-year reports a type error instead of its real
-  # reason. Normalising once here fixes both, and makes the internal and
-  # external paths behave identically downstream.
-  dwg <- run_stage("normalize_dates", normalize_dwg_dates(dwg))
+  # Fetches and normalises in one step, and caches the result -- see
+  # fetch_fishery_dwg() in fishery_data.R. Set USE_DWG_CACHE <- FALSE, or
+  # delete outputs/cache/dwg/, to force a refetch.
+  dwg <- run_stage("fetch_data", fetch_fishery_dwg(fishery_name, est_dates))
 
   # Must run BEFORE preflight so `sections`, prep_days()'s open_section_*
   # columns and prep_inputs_bss()'s S/O/p_TI all agree on the reduced set.
@@ -1288,4 +1180,4 @@ if (any(run_ledger$status == "skipped")) { cli::cli_h3("Skipped"); run_ledger |>
 cli::cli_alert_success("Done. See analysis/bss_bias/outputs/ for bss_b_summary.csv, bss_b_comparability_raw.csv, bss_b_run_ledger.csv.")
 cli::cli_alert_info("Next: Rscript analysis/bss_bias/02_build_comparability_table.R (fast, no fits needed) and 03_plot_b_series.R / 04_candidate_options.R once bss_b_summary.csv has rows.")
 
-if (!is.null(DB_CONN)) try(DBI::dbDisconnect(DB_CONN), silent = TRUE)
+disconnect_fishery_data()
