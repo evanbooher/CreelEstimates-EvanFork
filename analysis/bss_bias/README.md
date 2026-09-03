@@ -131,6 +131,13 @@ Run in order:
    than guessing when the top candidates tie. Set `LUT_TABLE` at the top to
    skip the search once the table is known.
 
+1d. **`fishery_data.R`** -- not a step; the shared data layer. Everything
+   between "a fishery name" and "the raw dwg tables for its estimation
+   window": `DATA_SOURCE`, the single DB connection, the captured-window
+   lookup, date normalisation, and a disk cache of each fetch. Sourced by
+   step 2 and by `02b`, so the fits and the coverage tables cannot disagree
+   about which window a fishery-year used.
+
 2. **`01_fit_bss_bias.R`** -- the main driver. For each included
    fishery-year: fetch data, prep BSS inputs, fit the Stan model, extract
    `b`. Writes a **comparability row per fishery-year BEFORE fitting**, so
