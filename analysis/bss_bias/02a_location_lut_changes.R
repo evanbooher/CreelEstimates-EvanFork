@@ -51,6 +51,20 @@
 #   Water body is part of the grain throughout, because a section number only
 #   identifies a block within one, and every tributary restarts at river mile 0.
 #
+# ------------------------------------------------------------------------------
+# DEFINED SCOPE vs FITTED SCOPE
+#
+#   The continuity measures here run on the sections 01_fit_bss_bias.R actually
+#   fits (scope_rules.R), not on everything the lookup defines. Otherwise they
+#   answer the wrong question: Skagit spring Chinook upper reads as gaining
+#   five sites in 2024, and Skagit fall salmon a seventh section in 2025, when
+#   both gained the CASCADE -- a separate water body the fits exclude precisely
+#   so the series stays comparable.
+#
+#   bss_b_lut_scope_effect.csv keeps both views side by side. "What did the
+#   program change" and "what changed in the data behind b" are different
+#   questions, and the gap between them is itself worth seeing.
+#
 # Usage:
 #   Rscript analysis/bss_bias/02a_location_lut_changes.R
 #
@@ -65,6 +79,7 @@
 #   bss_b_lut_year_over_year.csv    -- NAMED diff between consecutive years: sites added, dropped, re-blocked
 #   bss_b_lut_core_sites.csv        -- sites present in every year, and whether their block held
 #   bss_b_lut_block_year_over_year.csv -- census blocks added/dropped between consecutive years
+#   bss_b_lut_scope_effect.csv      -- defined vs fitted scope per fishery-year, and what was excluded
 #   bss_b_lut_location_changes.csv  -- per site: years present, persistent/added/dropped/intermittent
 #   bss_b_lut_section_year.csv      -- fishery_type x year x water body x section
 #   bss_b_lut_water_body_year.csv   -- fishery_type x year x water body
@@ -85,6 +100,10 @@ library(cli)
 library(here)
 
 source(here::here("analysis", "bss_bias", "common.R"))
+# The same scope rules 01_fit_bss_bias.R applies when building model inputs, so
+# the continuity reported here can be read against the water b is actually fit
+# to -- not against water the fits exclude.
+source(here::here("analysis", "bss_bias", "scope_rules.R"))
 
 OUT_DIR <- here::here("analysis", "bss_bias", "outputs")
 FIG_DIR <- file.path(OUT_DIR, "figures")
@@ -163,15 +182,77 @@ finite_or_na <- function(x) if_else(is.finite(x), x, NA_real_)
 # it is about the places index counts actually happen. Census-block changes are
 # reported separately, further down.
 all_locations <- lut |>
-  distinct(basin = basin_of(fishery_type), fishery_type, year, location_type,
+  distinct(basin = basin_of(fishery_type), fishery_type, fishery_name, year, location_type,
            location_id, location_code, section_num, water_body_code, survey_type)
 
-sites <- all_locations |> filter(location_type == "Site")
-census_blocks <- all_locations |> filter(location_type == "Section")
+# IN SCOPE = the sections 01_fit_bss_bias.R actually fits, per scope_rules.R.
+# Without this the continuity measures describe water `b` never sees: Skagit
+# spring Chinook upper reads as gaining five sites in 2024 when what it gained
+# was the Cascade, which the fits exclude, and Skagit fall salmon reads as
+# gaining a seventh section in 2025 for the same reason.
+#
+# Reported BOTH ways throughout. As-defined answers "what did the program
+# change"; as-fitted answers "what changed in the data behind b". They are
+# different questions and the gap between them is itself informative.
+# Resolved once per fishery-year, not per row: fishery_section_limit() reads the
+# lookup and can abort, and there are 28 names against 600-odd rows.
+scope_by_fishery <- tibble(fishery_name = sort(unique(all_locations$fishery_name))) |>
+  mutate(section_limit = map(fishery_name, fishery_section_limit))
+
+all_locations <- all_locations |>
+  left_join(scope_by_fishery, by = "fishery_name") |>
+  mutate(in_scope = map2_lgl(section_limit, section_num,
+                             ~ is.null(.x) || as.double(.y) %in% .x)) |>
+  select(-section_limit)
+
+n_out <- sum(!all_locations$in_scope)
+if (n_out > 0) {
+  cli::cli_alert_info("{n_out} location row(s) fall outside the fitted scope:")
+  all_locations |>
+    filter(!in_scope) |>
+    count(fishery_type, year, water_body_code, name = "n_rows") |>
+    print(n = 30)
+}
+
+# Everything downstream runs on the FITTED scope, because the question the
+# whole script serves is what a `b` comparison across years is comparing.
+# sites_defined keeps the unrestricted view for the scope-effect table below.
+sites_defined  <- all_locations |> filter(location_type == "Site")
+sites          <- sites_defined |> filter(in_scope)
+census_blocks  <- all_locations |> filter(location_type == "Section", in_scope)
 
 cli::cli_alert_info(
-  "{nrow(sites)} index-site rows and {nrow(census_blocks)} census-block rows."
+  "{nrow(sites)} index-site rows and {nrow(census_blocks)} census-block rows \\
+   ({sum(sites$in_scope)} sites in fitted scope)."
 )
+
+# ------------------------------------------------------------------------------
+# What the scope rules removed
+# ------------------------------------------------------------------------------
+# Side by side, per fishery-year: what the program defined, and what the fits
+# actually use. A row where the two differ is a year whose raw construction
+# change is partly or wholly an artifact of water the model never sees.
+
+scope_effect <- sites_defined |>
+  group_by(basin, fishery_type, year) |>
+  summarise(
+    n_sites_defined = n_distinct(location_id),
+    n_sites_fitted  = n_distinct(location_id[in_scope]),
+    water_defined   = paste(sort(unique(water_body_code)), collapse = ", "),
+    water_excluded  = paste(sort(unique(water_body_code[!in_scope])), collapse = ", "),
+    .groups = "drop"
+  ) |>
+  mutate(n_sites_excluded = n_sites_defined - n_sites_fitted) |>
+  arrange(basin, fishery_type, year)
+
+write_csv(scope_effect, file.path(OUT_DIR, "bss_b_lut_scope_effect.csv"))
+cli::cli_alert_success("Wrote bss_b_lut_scope_effect.csv.")
+
+cli::cli_h2("Defined vs fitted scope")
+scope_effect |>
+  filter(n_sites_excluded > 0) |>
+  select(fishery_type, year, n_sites_defined, n_sites_fitted, n_sites_excluded, water_excluded) |>
+  print(n = 40)
 
 # ==============================================================================
 # PRIMARY: is it the same set of sites?
