@@ -81,6 +81,7 @@
 #   bss_b_lut_block_year_over_year.csv -- census blocks added/dropped between consecutive years
 #   bss_b_lut_scope_effect.csv      -- defined vs fitted scope per fishery-year, and what was excluded
 #   bss_b_lut_site_series_summary.csv -- core vs union sites, permanent departures vs skipped years
+#   bss_b_lut_block_lineage.csv     -- blocks matched between years on membership: renumbered vs redrawn
 #   bss_b_lut_location_changes.csv  -- per site: years present, persistent/added/dropped/intermittent
 #   bss_b_lut_section_year.csv      -- fishery_type x year x water body x section
 #   bss_b_lut_water_body_year.csv   -- fishery_type x year x water body
@@ -612,12 +613,89 @@ cli::cli_h2("Census blocks, year over year")
 block_year_over_year |> select(-basin, -added, -dropped) |> print(n = 40)
 
 # ------------------------------------------------------------------------------
+# Block identity by MEMBERSHIP, not by number
+# ------------------------------------------------------------------------------
+# A section number is a label, and inserting one block renumbers every block
+# above it. Skagit fall salmon 2021->2022 shifts s3->s4, s4->s5, s5->s6 when the
+# Hwy 9 split adds a block low down: those three blocks keep their sites and
+# change their name. Judged on the number alone every site in them looks
+# re-blocked, which is the same over-count as scoring a temporary contraction
+# as turnover.
+#
+# So blocks are matched between consecutive years on WHO IS IN THEM. A block in
+# year B is the continuation of the year-A block sharing most of its sites; if
+# the number differs it was renumbered, not redrawn.
+
+# Jaccard of site membership. 0.8 tolerates a block gaining or losing a site
+# while staying recognisably the same block, and still separates a genuine
+# split -- which halves membership and lands far below it.
+BLOCK_MATCH_MIN <- 0.8
+
+block_members <- sites |>
+  group_by(basin, fishery_type, year, water_body_code, section_num) |>
+  summarise(members = list(sort(unique(location_id))), .groups = "drop") |>
+  mutate(block = paste0(water_body_code, " s", section_num))
+
+match_blocks <- function(ftype, y_prev, y_now) {
+  A <- block_members |> filter(fishery_type == ftype, year == y_prev)
+  B <- block_members |> filter(fishery_type == ftype, year == y_now)
+  if (nrow(A) == 0 || nrow(B) == 0) return(NULL)
+
+  map(seq_len(nrow(B)), function(i) {
+    j_all   <- map_dbl(A$members, ~ jaccard(.x, B$members[[i]]))
+    best    <- which.max(j_all)
+    is_same <- j_all[best] >= BLOCK_MATCH_MIN
+    renamed <- is_same && A$section_num[best] != B$section_num[i]
+    tibble(
+      fishery_type = ftype, prev_year = y_prev, year = y_now,
+      block         = B$block[i],
+      matched_block = if (is_same) A$block[best] else NA_character_,
+      overlap       = round(j_all[best], 3),
+      renumbered    = renamed,
+      status = if (!is_same) "new or redrawn"
+               else if (renamed) "same block, renumbered"
+               else "same block, same number"
+    )
+  }) |> bind_rows()
+}
+
+block_lineage <- pmap(
+  list(year_pairs$fishery_type, year_pairs$prev_year, year_pairs$year),
+  match_blocks
+) |> bind_rows()
+
+write_csv(block_lineage, file.path(OUT_DIR, "bss_b_lut_block_lineage.csv"))
+cli::cli_alert_success("Wrote bss_b_lut_block_lineage.csv.")
+
+cli::cli_h2("Block continuity, judged on membership rather than number")
+block_lineage |>
+  count(fishery_type, status) |>
+  pivot_wider(names_from = status, values_from = n, values_fill = 0) |>
+  print()
+
+# ------------------------------------------------------------------------------
 # The constant core
 # ------------------------------------------------------------------------------
 # Sites present in EVERY year of a fishery, and whether their block assignment
 # also held. This is the "what stayed the same" answer at its most concrete: a
 # site in the core with one assignment throughout is a piece of the fishery that
 # is genuinely comparable across the whole series.
+
+# Whether a site's block was CONTINUOUS across a pair, by membership: its
+# year-B block is a continuation of the year-A block it was actually in.
+site_block_continuity <- sites |>
+  mutate(block = paste0(water_body_code, " s", section_num)) |>
+  distinct(fishery_type, year, location_id, block) |>
+  inner_join(block_lineage |> select(fishery_type, prev_year, year, block, matched_block),
+             by = c("fishery_type", "year", "block")) |>
+  # the block this site was in the previous year
+  left_join(sites |> mutate(prev_block = paste0(water_body_code, " s", section_num)) |>
+              distinct(fishery_type, prev_year = year, location_id, prev_block),
+            by = c("fishery_type", "prev_year", "location_id")) |>
+  filter(!is.na(prev_block)) |>
+  mutate(block_continuous = !is.na(matched_block) & matched_block == prev_block) |>
+  group_by(fishery_type, location_id) |>
+  summarise(all_pairs_continuous = all(block_continuous), .groups = "drop")
 
 core_sites <- site_year_section |>
   group_by(basin, fishery_type, location_id, location_code) |>
@@ -626,12 +704,17 @@ core_sites <- site_year_section |>
             n_assignments = n_distinct(assigned),
             .groups = "drop") |>
   left_join(fishery_year_span, by = "fishery_type") |>
+  left_join(site_block_continuity, by = c("fishery_type", "location_id")) |>
   mutate(n_years_fishery = map_int(all_years, length),
          in_core = n_years == n_years_fishery,
+         # Three outcomes, not two. A site whose block kept its membership but
+         # changed number has not been regrouped, and its index count still
+         # pairs with the same census total -- which is what matters for `b`.
          core_status = case_when(
-           !in_core             ~ "not in every year",
-           n_assignments == 1   ~ "core, same block throughout",
-           TRUE                 ~ "core, re-blocked"
+           !in_core                                    ~ "not in every year",
+           n_assignments == 1                          ~ "core, same block and number",
+           coalesce(all_pairs_continuous, FALSE)       ~ "core, block renumbered only",
+           TRUE                                        ~ "core, genuinely regrouped"
          )) |>
   select(basin, fishery_type, location_code, core_status, n_years, n_years_fishery,
          n_assignments, assignments) |>
