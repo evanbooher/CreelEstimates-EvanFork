@@ -551,8 +551,13 @@ plot_calendar <- function(df, ftype) {
     # with 9, instead of the same band padded out with whitespace.
     facet_grid(year ~ ., scales = "free_y", space = "free_y", switch = "y") +
     scale_fill_manual(values = STATUS_COLORS, drop = FALSE, name = NULL) +
+    # Half a day of padding each side, not expand = c(0, 0). A tile centred on
+    # the first day spans +/- 0.5, so limits set to exactly the data range clip
+    # half of it against the panel edge -- which is how the 1 September census
+    # in Stillaguamish 2022-23 came to look like it was not there. This keeps
+    # the edge days full width and adds no whitespace beyond them.
     scale_x_continuous(
-      limits = rng, expand = c(0, 0),
+      limits = rng + c(-0.5, 0.5), expand = c(0, 0),
       breaks = scales::breaks_width(14), labels = doy_label
     ) +
     scale_y_discrete(expand = c(0, 0)) +
