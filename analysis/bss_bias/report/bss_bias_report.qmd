@@ -453,22 +453,6 @@ September**, so a pink-year coefficient in those basins would be estimating
 refitting there would cost in paired days.
 
 
-::: {.callout-important}
-## What still needs deciding in the room
-1. **Nothing here downgrades a year automatically.** The window and coverage
-   differences above are reported, not scored. Whether a year with 2 paired
-   days belongs in the same τ² as one with 18 is a judgement the group has to
-   make, and it is not made anywhere in this pipeline.
-2. **Variance components in §2–3 are computed over ALL fishery-years.** A
-   restricted sensitivity run is one filter away (`INCLUDE_TIERS` in
-   `06_variability_analysis.R`), and `bss_b_fishery_composition.csv` is the
-   table to pick that restriction from.
-3. **Section numbering is not stable between years.** Blocks get split and
-   everything above them renumbered, so a section number is a label rather
-   than a place. `bss_b_lut_block_lineage.csv` matches blocks between years on
-   their site membership and separates a renumbering from a genuine redraw.
-:::
-
 ## Appendix
 
 ### Diagnostics
