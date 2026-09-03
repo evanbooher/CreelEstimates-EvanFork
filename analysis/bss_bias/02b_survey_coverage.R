@@ -58,6 +58,7 @@
 #   bss_b_survey_by_section.csv     -- per fishery-year x section: first/last survey, spread
 #   bss_b_survey_date_match.csv     -- per fishery x month-day x section: which years surveyed it
 #   bss_b_fishery_composition.{csv,html} -- one line per fishery-year: defined vs surveyed
+#   bss_b_no_data_gaps.csv          -- runs of 7+ days with no record anywhere: probable missing closures
 #   bss_b_common_window_cost.csv    -- the window all years share, and the tie-in days a refit there costs
 #   bss_b_parity_confound.csv       -- whether pink parity is separable from window start, per fishery
 #   figures/fig13_survey_calendar.{png,pdf}
@@ -331,6 +332,58 @@ date_match |>
   count(fishery_type, agreement) |>
   pivot_wider(names_from = agreement, values_from = n, values_fill = 0) |>
   print()
+
+# ------------------------------------------------------------------------------
+# Long stretches with no data at all -- probable missing closure records
+# ------------------------------------------------------------------------------
+# prep_days() assumes a day is OPEN unless a closure record exists, so a missing
+# closure and a genuinely open day are indistinguishable. A long run of days
+# where NOTHING was recorded in ANY section is the signature of the former, and
+# it is not harmless: O[s,d] stays 1 across the run, and O multiplies latent
+# effort in the Stan model, so the fishery-level expansion covers a stretch the
+# fishery may have been shut.
+#
+# Stillaguamish 2022-23 is the case that prompted this: 1 October to 15
+# November 2022, 46 consecutive days out of a 91-day window -- 51% of it --
+# with no effort row and no interview row anywhere in the basin. Confirmed
+# against the raw tables, with tie_in_indicator clean and no missing section
+# numbers, so nothing was hiding.
+#
+# This is a FLAG, not a finding. A run may be a real closure, a genuine
+# mid-season break, or missing records; the table says where to look.
+
+MIN_GAP_DAYS <- 7
+
+no_data_gaps <- survey_days |>
+  group_by(fishery_type, year, fishery_name, event_date) |>
+  summarise(any_record = any(surveyed), .groups = "drop") |>
+  arrange(fishery_type, year, event_date) |>
+  group_by(fishery_type, year, fishery_name) |>
+  # A run id that increments every time the any_record state flips.
+  mutate(run = cumsum(any_record != lag(any_record, default = first(any_record)))) |>
+  filter(!any_record) |>
+  group_by(fishery_type, year, fishery_name, run) |>
+  summarise(gap_start = min(event_date), gap_end = max(event_date),
+            gap_days = n(), .groups = "drop") |>
+  filter(gap_days >= MIN_GAP_DAYS) |>
+  left_join(by_fishery |> select(fishery_name, n_days_window), by = "fishery_name") |>
+  mutate(pct_of_window = round(100 * gap_days / n_days_window, 1)) |>
+  select(-run) |>
+  arrange(desc(gap_days))
+
+write_csv(no_data_gaps, file.path(OUT_DIR, "bss_b_no_data_gaps.csv"))
+
+if (nrow(no_data_gaps) > 0) {
+  cli::cli_alert_warning(
+    "{nrow(no_data_gaps)} stretch(es) of {MIN_GAP_DAYS}+ days with no record in any section -- \\
+     check these against the closure record before trusting n_days_open:"
+  )
+  no_data_gaps |>
+    select(fishery_type, year, gap_start, gap_end, gap_days, n_days_window, pct_of_window) |>
+    print(n = 40)
+} else {
+  cli::cli_alert_success("No stretch of {MIN_GAP_DAYS}+ days without a record.")
+}
 
 # ------------------------------------------------------------------------------
 # What each year actually covered

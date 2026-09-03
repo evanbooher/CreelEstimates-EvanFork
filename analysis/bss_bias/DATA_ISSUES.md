@@ -13,12 +13,21 @@ Nothing here is fixed. Some are worked around in `01_fit_bss_bias.R` /
 
 **Status: open. The most consequential item here.**
 
-`fig13_survey_calendar_Stillaguamish_salmon_and_gamefish.png` shows roughly
-five weeks of Stillaguamish 2022-23 — about **27 September to 1 November** —
-with every section reading `open, no survey`: no index counts, no census
-counts, no interviews, across all nine sections. The fishery lead's reading is
-that this stretch was **closed**, and that the closure dates are absent from
-the database.
+**Confirmed against the raw tables.** Stillaguamish 2022-23 has **no effort
+row and no interview row anywhere in the basin from 1 October to 15 November
+2022** — 46 consecutive days out of a 91-day estimation window, **51% of it**.
+Sampling is two blocks: 23 dates in September, 10 dates from 16 to 28 November.
+October is entirely absent. The fishery lead's reading is that this stretch was
+**closed**, and that the closure dates are absent from the database.
+
+Neither of the ways a record could have hidden from `bss_b_survey_days.csv`
+applies here: `tie_in_indicator` is clean (2772 `FALSE`, 77 `TRUE`, no `NA`)
+and neither table has a missing `section_num`. Nothing was dropped — the data
+are simply not there.
+
+Both census dates that year, 1 and 17 September, fall in the opening fortnight,
+so that fishery-year's `b` is anchored entirely in the first 17 days of the
+window.
 
 ### Why it matters
 
@@ -57,8 +66,8 @@ expansion rests on.
 
 ### How to confirm
 
-`bss_b_survey_days.csv` already says no data were collected there, but two
-things could hide a record from that table, so check the raw tables:
+Re-run of the check that confirmed it, kept for the next fishery-year that
+needs the same treatment:
 
 ```r
 library(tidyverse); library(here)
@@ -85,11 +94,14 @@ win(dwg$effort) |> summarise(na_section = sum(is.na(section_num)))
 2. **Trim the estimation window** for that fishery-year in
    `lookup/fishery_params.csv`. Faster, but it changes what the window means
    and has to be recorded as a deviation.
-3. **Check every other fishery-year for the same pattern** — a long
-   all-sections `open, no survey` block in `bss_b_survey_days.csv` is the
-   signature. This has only been looked at for Stillaguamish.
+3. **Check every other fishery-year for the same pattern.** Now automatic:
+   `02b_survey_coverage.R` writes `bss_b_no_data_gaps.csv`, every run of 7+
+   consecutive days with no record in any section, with the run's share of the
+   estimation window. It warns on the console when any are found.
 
-Worth checking (3) before trusting `n_days_open` anywhere.
+`bss_b_no_data_gaps.csv` is a FLAG, not a finding — a run may be a real
+closure, a genuine mid-season break, or missing records. It says where to look.
+Worth clearing before trusting `n_days_open` anywhere.
 
 ---
 
