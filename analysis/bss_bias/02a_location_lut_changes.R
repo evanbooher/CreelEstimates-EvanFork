@@ -62,6 +62,8 @@
 #   bss_b_lut_index_density.csv     -- index sites per section-block, the coverage ratio `b` absorbs
 #   bss_b_lut_index_density_summary.csv -- per fishery-year: blocks, sites per block, spread
 #   bss_b_lut_site_moves.csv        -- sites kept but re-blocked, so paired with a different census count
+#   bss_b_lut_year_over_year.csv    -- NAMED diff between consecutive years: sites added, dropped, re-blocked
+#   bss_b_lut_core_sites.csv        -- sites present in every year, and whether their block held
 #   bss_b_lut_location_changes.csv  -- per site: years present, persistent/added/dropped/intermittent
 #   bss_b_lut_section_year.csv      -- fishery_type x year x water body x section
 #   bss_b_lut_water_body_year.csv   -- fishery_type x year x water body
@@ -337,6 +339,120 @@ cli::cli_h3("Site turnover by fishery")
 location_changes |>
   count(fishery_type, status) |>
   pivot_wider(names_from = status, values_from = n, values_fill = 0) |>
+  print()
+
+# ------------------------------------------------------------------------------
+# Year over year: what was built the same, and what was built differently
+# ------------------------------------------------------------------------------
+# The named diff between consecutive years of one fishery. The set-overlap
+# numbers above say HOW MUCH changed; this says WHAT -- which sites arrived,
+# which left, and which stayed put but were re-blocked. Those are three
+# different things to follow up and only the first two change the footprint.
+
+site_year_section <- sites |>
+  group_by(basin, fishery_type, year, location_id, location_code) |>
+  summarise(assigned = paste0(water_body_code, " s", sort(unique(section_num)), collapse = " + "),
+            .groups = "drop")
+
+year_pairs <- site_year_section |>
+  distinct(basin, fishery_type, year) |>
+  arrange(basin, fishery_type, year) |>
+  group_by(fishery_type) |>
+  mutate(prev_year = lag(year)) |>
+  ungroup() |>
+  filter(!is.na(prev_year))
+
+describe_pair <- function(ftype, y_prev, y_now) {
+  prev <- site_year_section |> filter(fishery_type == ftype, year == y_prev)
+  now  <- site_year_section |> filter(fishery_type == ftype, year == y_now)
+
+  added   <- now  |> filter(!location_id %in% prev$location_id)
+  dropped <- prev |> filter(!location_id %in% now$location_id)
+  # A site in both years whose block assignment differs: kept, re-blocked.
+  moved <- now |>
+    inner_join(prev, by = c("location_id", "location_code"), suffix = c("_now", "_prev")) |>
+    filter(assigned_now != assigned_prev)
+
+  # From `sites` rather than section_year, which is built further down -- and
+  # `sites` is the same source, so the block set is identical either way.
+  sec <- function(y) {
+    sites |>
+      filter(fishery_type == ftype, year == y) |>
+      distinct(water_body_code, section_num) |>
+      mutate(lbl = paste0(water_body_code, " s", section_num)) |>
+      pull(lbl) |> sort()
+  }
+  sec_prev <- sec(y_prev); sec_now <- sec(y_now)
+
+  tibble(
+    fishery_type   = ftype,
+    year_prev      = y_prev,
+    year           = y_now,
+    n_retained     = nrow(now) - nrow(added),
+    n_added        = nrow(added),
+    n_dropped      = nrow(dropped),
+    n_moved_block  = nrow(moved),
+    sites_added    = paste(sort(added$location_code),   collapse = "; "),
+    sites_dropped  = paste(sort(dropped$location_code), collapse = "; "),
+    sites_moved    = paste(sort(paste0(moved$location_code, " (", moved$assigned_prev,
+                                       " -> ", moved$assigned_now, ")")), collapse = "; "),
+    blocks_added   = paste(setdiff(sec_now, sec_prev), collapse = "; "),
+    blocks_dropped = paste(setdiff(sec_prev, sec_now), collapse = "; "),
+    verdict = dplyr::case_when(
+      nrow(added) == 0 & nrow(dropped) == 0 & nrow(moved) == 0 ~ "identical construction",
+      nrow(added) == 0 & nrow(dropped) == 0                    ~ "same sites, re-blocked",
+      nrow(moved) == 0                                         ~ "sites changed, blocking held",
+      TRUE                                                     ~ "sites changed and re-blocked"
+    )
+  )
+}
+
+year_over_year <- pmap(
+  list(year_pairs$fishery_type, year_pairs$prev_year, year_pairs$year),
+  describe_pair
+) |> bind_rows()
+
+write_csv(year_over_year, file.path(OUT_DIR, "bss_b_lut_year_over_year.csv"))
+cli::cli_alert_success("Wrote bss_b_lut_year_over_year.csv ({nrow(year_over_year)} year pairs).")
+
+cli::cli_h2("Year-over-year construction")
+year_over_year |>
+  select(fishery_type, year_prev, year, n_retained, n_added, n_dropped, n_moved_block, verdict) |>
+  print(n = 60)
+
+# ------------------------------------------------------------------------------
+# The constant core
+# ------------------------------------------------------------------------------
+# Sites present in EVERY year of a fishery, and whether their block assignment
+# also held. This is the "what stayed the same" answer at its most concrete: a
+# site in the core with one assignment throughout is a piece of the fishery that
+# is genuinely comparable across the whole series.
+
+core_sites <- site_year_section |>
+  group_by(basin, fishery_type, location_id, location_code) |>
+  summarise(n_years = n_distinct(year),
+            assignments = paste0(year, ": ", assigned, collapse = "; "),
+            n_assignments = n_distinct(assigned),
+            .groups = "drop") |>
+  left_join(fishery_year_span, by = "fishery_type") |>
+  mutate(n_years_fishery = map_int(all_years, length),
+         in_core = n_years == n_years_fishery,
+         core_status = case_when(
+           !in_core             ~ "not in every year",
+           n_assignments == 1   ~ "core, same block throughout",
+           TRUE                 ~ "core, re-blocked"
+         )) |>
+  select(basin, fishery_type, location_code, core_status, n_years, n_years_fishery,
+         n_assignments, assignments) |>
+  arrange(basin, fishery_type, core_status, location_code)
+
+write_csv(core_sites, file.path(OUT_DIR, "bss_b_lut_core_sites.csv"))
+cli::cli_alert_success("Wrote bss_b_lut_core_sites.csv.")
+
+cli::cli_h2("Constant core: sites in every year, and whether the block held")
+core_sites |>
+  count(fishery_type, core_status) |>
+  pivot_wider(names_from = core_status, values_from = n, values_fill = 0) |>
   print()
 
 # ==============================================================================
