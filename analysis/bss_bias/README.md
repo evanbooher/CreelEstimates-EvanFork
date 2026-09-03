@@ -116,6 +116,11 @@ Run in order:
    different days comparable -- something the live lookup cannot guarantee,
    VPN or not.
 
+**Data issues found along the way** are recorded in
+[`DATA_ISSUES.md`](DATA_ISSUES.md) — findings about the underlying creel data
+rather than this analysis's code. The first one, missing closure records,
+affects the creel estimates themselves and not just this work.
+
 1c. **`00c_probe_location_lut.R`** -- **VPN required; run once, commit the
    result. Participants do not run this.** Finds the fishery/location lookup
    table in the internal database and captures the rows for the target
