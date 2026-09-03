@@ -56,17 +56,20 @@
 #   bss_b_survey_by_fishery.csv     -- per fishery-year: days surveyed, tie-in days, coverage
 #   bss_b_survey_by_section.csv     -- per fishery-year x section: first/last survey, spread
 #   bss_b_survey_date_match.csv     -- per fishery x month-day x section: which years surveyed it
+#   bss_b_fishery_composition.{csv,html} -- one line per fishery-year: defined vs surveyed
 #   bss_b_common_window_cost.csv    -- the window all years share, and the tie-in days a refit there costs
 #   bss_b_parity_confound.csv       -- whether pink parity is separable from window start, per fishery
 #   figures/fig13_survey_calendar.{png,pdf}
 #   figures/fig14_season_ramp.{png,pdf}
 #   figures/fig15_tie_in_days.{png,pdf}
+#   figures/fig16_fishery_composition.{png,pdf}
 # ==============================================================================
 
 library(tidyverse)
 library(cli)
 library(here)
 library(creelutils)
+library(gt)
 library(zoo)   # rollmean, for the season-ramp smoothing
 
 source(here::here("analysis", "bss_bias", "common.R"))
@@ -324,6 +327,70 @@ date_match |>
   print()
 
 # ------------------------------------------------------------------------------
+# What each year actually covered
+# ------------------------------------------------------------------------------
+# The one-line-per-fishery-year answer to "how has this fishery changed", with
+# what was DEFINED and what was SURVEYED side by side. They are not the same:
+# Stillaguamish 2022-23 defined nine sections and surveyed eight, and its
+# section 7 was surveyed on exactly one day. A defined footprint is a plan; the
+# survey record is what the estimate rests on.
+#
+# The last column is the one that governs `b`. Everything else describes the
+# fishery; paired index + census days describe the evidence.
+
+lut_defined <- if (file.exists(LUT_PATH)) {
+  read_csv(LUT_PATH, show_col_types = FALSE) |>
+    mutate(fishery_type = fishery_type_from_name(fishery_name),
+           year = as.integer(fishery_start_year)) |>
+    group_by(fishery_type, year) |>
+    summarise(
+      water_bodies       = paste(sort(unique(str_replace(water_body_code, "^Stillaguamish - ", ""))),
+                                 collapse = "+"),
+      sections_defined   = n_distinct(section_num),
+      index_sites_defined = n_distinct(location_id[str_to_lower(location_type) == "site"]),
+      .groups = "drop"
+    )
+} else NULL
+
+composition <- by_fishery |>
+  select(fishery_type, year, n_days_window, n_sections, n_days_surveyed, n_days_tie_in) |>
+  rename(sections_surveyed = n_sections)
+
+if (!is.null(lut_defined)) {
+  composition <- composition |>
+    left_join(lut_defined, by = c("fishery_type", "year")) |>
+    relocate(water_bodies, sections_defined, index_sites_defined, .after = year)
+}
+
+composition <- composition |>
+  mutate(parity = year_parity_label(year)) |>
+  arrange(fishery_type, year)
+
+write_csv(composition, file.path(OUT_DIR, "bss_b_fishery_composition.csv"))
+cli::cli_alert_success("Wrote bss_b_fishery_composition.csv.")
+
+cli::cli_h2("What each year covered")
+print(composition, n = 40, width = Inf)
+
+if (requireNamespace("gt", quietly = TRUE) && !is.null(lut_defined)) {
+  gt_comp <- composition |>
+    gt::gt(groupname_col = "fishery_type") |>
+    gt::tab_header(
+      title = "What each fishery-year covered",
+      subtitle = "Defined comes from the location lookup, surveyed from the effort and interview record. The last column is what informs b."
+    ) |>
+    gt::tab_spanner("Defined", columns = c(water_bodies, sections_defined, index_sites_defined)) |>
+    gt::tab_spanner("Surveyed", columns = c(n_days_window, sections_surveyed, n_days_surveyed, n_days_tie_in)) |>
+    gt::cols_label(water_bodies = "Water", sections_defined = "Sections",
+                   index_sites_defined = "Index sites", n_days_window = "Window days",
+                   sections_surveyed = "Sections", n_days_surveyed = "Days surveyed",
+                   n_days_tie_in = "Paired index+census days", parity = "Year") |>
+    gt::opt_row_striping()
+  gt::gtsave(gt_comp, file.path(OUT_DIR, "bss_b_fishery_composition.html"))
+  cli::cli_alert_success("Wrote bss_b_fishery_composition.html")
+}
+
+# ------------------------------------------------------------------------------
 # The common window, and what restricting to it would cost
 # ------------------------------------------------------------------------------
 # `b` is a SINGLE POOLED SCALAR -- vector[G] b, no day or section index -- so it
@@ -548,6 +615,54 @@ fig15 <- survey_days |>
 
 save_fig(fig15, "fig15_tie_in_days", width = 12, height = 7)
 cli::cli_alert_success("Wrote fig15_tie_in_days.")
+
+# ------------------------------------------------------------------------------
+# Fig 16 -- how each fishery changed, year to year
+# ------------------------------------------------------------------------------
+# The composition table read visually. Four measures on four rows sharing one
+# year axis, because they are on wildly different scales -- days in the window
+# run to 140, paired index+census days to 18 -- and forcing them onto one axis
+# would flatten the measure that matters most. Each row keeps its own scale and
+# says what it is.
+#
+# The rows run from what was planned to what the estimate rests on:
+#   sections defined -> sections surveyed -> days surveyed -> paired days.
+# A gap opening between consecutive rows is where a plan stopped becoming data.
+
+MEASURE_LEVELS <- c(
+  "Sections defined"          = "sections_defined",
+  "Sections surveyed"         = "sections_surveyed",
+  "Days surveyed"             = "n_days_surveyed",
+  "Paired index+census days"  = "n_days_tie_in"
+)
+have <- MEASURE_LEVELS[MEASURE_LEVELS %in% names(composition)]
+
+comp_long <- composition |>
+  select(fishery_type, year, all_of(unname(have))) |>
+  pivot_longer(-c(fishery_type, year), names_to = "measure", values_to = "value") |>
+  mutate(measure = factor(measure, levels = unname(have), labels = names(have)))
+
+# One series per panel, so no colour encoding and no legend: the facet strip
+# already names the fishery, and a hue here would carry no information.
+fig16 <- comp_long |>
+  ggplot(aes(x = year, y = value, group = fishery_type)) +
+  geom_line(linewidth = 0.7, colour = CAT[["blue"]], alpha = 0.85) +
+  geom_point(size = 2.2, colour = CAT[["blue"]]) +
+  geom_text(aes(label = value), vjust = -0.9, size = 2.7, colour = INK_SECOND) +
+  facet_grid(measure ~ fishery_type, scales = "free", switch = "y") +
+  scale_x_continuous(breaks = sort(unique(comp_long$year))) +
+  scale_y_continuous(expand = expansion(mult = c(0.08, 0.22))) +
+  labs(
+    title = "How each fishery changed, year to year",
+    subtitle = "Top row is what the location lookup defined; the rest is what the survey record holds. The bottom row -- section-days carrying both an index and a census count -- is the only one that informs b.",
+    x = NULL, y = NULL
+  ) +
+  theme_bss() +
+  theme(strip.placement = "outside", panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+save_fig(fig16, "fig16_fishery_composition", width = 14, height = 8)
+cli::cli_alert_success("Wrote fig16_fishery_composition.")
 
 cli::cli_h2("Done")
 cli::cli_alert_info(
