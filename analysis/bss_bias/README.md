@@ -197,7 +197,15 @@ affects the creel estimates themselves and not just this work.
 
    Runs complete without step 8; results are then in percent rather than fish.
 
-8. **`01b_fit_catch_groups.R`** *(optional, MCMC)* -- re-fits the BSS against a
+8. **`00d_catch_inventory.R`** -- run BEFORE step 9. Totals of raw interview
+   catch per fishery-year for each named catch group, read from the cached DWG
+   fetches (no DB, no VPN). Says which groups actually have records, so MCMC is
+   not spent on a group that has none. Group definitions are shared with step 9
+   via `catch_groups.R`, so the inventory always describes the groups that will
+   be fitted. These are **raw interview counts, not expanded estimates** -- they
+   answer "is this worth fitting", not "how many fish were caught".
+
+9. **`01b_fit_catch_groups.R`** *(optional, MCMC)* -- re-fits the BSS against a
    named catch group purely to retain `C_sum`, which `SAVE_FITS <- FALSE`
    otherwise discards. `b` is **invariant to the catch group** (the effort and
    catch sub-models share no parameters, and `prep_dwg_interview_catch()` keeps

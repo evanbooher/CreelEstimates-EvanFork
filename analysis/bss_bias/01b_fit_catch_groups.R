@@ -83,29 +83,10 @@ group_key  <- GROUP_KEY
 fishery_re <- FISHERY_RE
 years_mode <- YEARS_MODE
 
-# ------------------------------------------------------------------------------
-# The catch groups. Each field is a str_detect PATTERN, so alternation works and
-# "NA" matches the literal string prep_dwg_interview_catch() coerces NA to.
-# ------------------------------------------------------------------------------
-
-CATCH_GROUPS <- list(
-  # Any encounter of Chinook -- adults and jacks, every mark status including
-  # unknown and unrecorded, kept and released.
-  chinook_all = list(
-    species    = "Chinook",
-    life_stage = "Adult|Jack",
-    fin_mark   = "UM|AD|UNK|NA",
-    fate       = "Released|Kept"
-  ),
-  # Coho harvest. Note this is NOT the pipeline default
-  # (Coho_Adult_AD|UM_Kept) -- it adds jacks, so it is a genuinely new fit.
-  coho_harvest = list(
-    species    = "Coho",
-    life_stage = "Adult|Jack",
-    fin_mark   = "UM|AD",
-    fate       = "Kept"
-  )
-)
+# Shared with 00d_catch_inventory.R so the inventory describes exactly the
+# groups these fits will use. Run 00d first -- it says which groups actually
+# have records, and a group with none is wasted MCMC.
+source(here::here("analysis", "bss_bias", "catch_groups.R"))
 
 keys <- if (identical(group_key, "all")) names(CATCH_GROUPS) else group_key
 bad  <- setdiff(keys, names(CATCH_GROUPS))

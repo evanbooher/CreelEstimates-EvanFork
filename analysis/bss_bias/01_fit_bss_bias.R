@@ -234,11 +234,19 @@ skip_fishery <- function(reason, stage = "preflight") {
   rlang::abort(message = reason, class = "fishery_skip", stage = stage, reason = reason)
 }
 
-run_stage <- function(stage, code) {
+# fatal = FALSE marks a stage whose failure must NOT cost the fishery-year: the
+# `b` estimate is the deliverable, and a convenience output failing to
+# summarise is not a reason to discard a completed Stan fit. Such a failure is
+# warned about and recorded, and the run continues.
+run_stage <- function(stage, code, fatal = TRUE) {
   tryCatch(
     code,
     fishery_skip = function(cnd) stop(cnd),
     error = function(e) {
+      if (!fatal) {
+        cli::cli_alert_warning("  [{stage}] non-fatal failure, continuing: {conditionMessage(e)}")
+        return(invisible(NULL))
+      }
       rlang::abort(
         message = paste0("[", stage, "] ", conditionMessage(e)),
         class = "fishery_error", stage = stage, reason = conditionMessage(e)
@@ -993,31 +1001,63 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   # prep_dwg_interview_catch() retains every interview at fish_count = 0 rather
   # than subsetting), so a re-fit under a second catch group must not write a
   # second `b` row. See CATCH_BASELINE_ONLY below.
-  totals_draws <- try(
-    posterior::as_draws_df(bss_fit) |> posterior::subset_draws(variable = c("C_sum", "E_sum")),
-    silent = TRUE
-  )
-  if (!inherits(totals_draws, "try-error") && ncol(totals_draws) > 3) {
-    totals_row <- posterior::summarise_draws(
-      totals_draws,
-      mean, sd, median = ~stats::median(.x),
-      q2.5  = ~stats::quantile(.x, probs = 0.025),
-      q97.5 = ~stats::quantile(.x, probs = 0.975)
-    ) |>
-      dplyr::rename(q2.5 = `2.5%`, q97.5 = `97.5%`) |>
-      tidyr::pivot_wider(
-        names_from = variable,
-        values_from = c(mean, sd, median, q2.5, q97.5),
-        names_glue = "{variable}_{.value}"
-      ) |>
-      dplyr::mutate(fishery_name = .env$fishery_name, est_cg = .env$chosen_ecg,
-                    fit_config = fit_config_name, n_div = n_div, runtime_sec = runtime_sec) |>
-      dplyr::relocate(fishery_name, est_cg)
-    append_csv_row(totals_row, file.path(OUT_DIR, "bss_catch_baseline.csv"))
-    cli::cli_alert_success("  Catch baseline written for est_cg '{chosen_ecg}'.")
-  } else {
-    cli::cli_alert_warning("  No C_sum/E_sum draws in this fit -- catch baseline not written.")
-  }
+  # WHOLLY NON-FATAL. The `b` estimate is the deliverable; the season totals are
+  # a convenience for 07. An earlier version aborted the whole fishery-year here
+  # when C_sum contained NaN draws -- stats::quantile() throws "missing values
+  # and NaN's not allowed if 'na.rm' is FALSE" -- discarding a completed fit
+  # over a summary. Every path below now either writes a row or warns.
+  #
+  # C_sum CAN legitimately be non-finite: it is a generated quantity summing
+  # lambda_E * L[d] * lambda_C over every day and section, so one non-finite
+  # day contaminates the total. n_finite_frac records how much of the posterior
+  # survived, so a partly-degenerate total is visible rather than silent.
+  run_stage("catch_baseline", {
+    totals_draws <- try(
+      posterior::as_draws_df(bss_fit) |> posterior::subset_draws(variable = c("C_sum", "E_sum")),
+      silent = TRUE
+    )
+    if (inherits(totals_draws, "try-error") || ncol(totals_draws) <= 3) {
+      cli::cli_alert_warning("  No C_sum/E_sum draws in this fit -- catch baseline not written.")
+    } else {
+      finite_frac <- vapply(
+        dplyr::select(as.data.frame(totals_draws), dplyr::any_of(c("C_sum", "E_sum"))),
+        function(x) mean(is.finite(x)), numeric(1)
+      )
+      if (all(finite_frac == 0)) {
+        cli::cli_alert_warning(
+          "  C_sum/E_sum are entirely non-finite -- catch baseline not written. \\
+           The `b` estimate is unaffected."
+        )
+      } else {
+        totals_row <- posterior::summarise_draws(
+          totals_draws,
+          mean   = ~mean(.x, na.rm = TRUE),
+          sd     = ~stats::sd(.x, na.rm = TRUE),
+          median = ~stats::median(.x, na.rm = TRUE),
+          q2.5   = ~stats::quantile(.x, probs = 0.025, na.rm = TRUE),
+          q97.5  = ~stats::quantile(.x, probs = 0.975, na.rm = TRUE)
+        ) |>
+          dplyr::rename(q2.5 = `2.5%`, q97.5 = `97.5%`) |>
+          dplyr::mutate(n_finite_frac = unname(finite_frac[variable])) |>
+          tidyr::pivot_wider(
+            names_from = variable,
+            values_from = c(mean, sd, median, q2.5, q97.5, n_finite_frac),
+            names_glue = "{variable}_{.value}"
+          ) |>
+          dplyr::mutate(fishery_name = .env$fishery_name, est_cg = .env$chosen_ecg,
+                        fit_config = fit_config_name, n_div = n_div, runtime_sec = runtime_sec) |>
+          dplyr::relocate(fishery_name, est_cg)
+        append_csv_row(totals_row, file.path(OUT_DIR, "bss_catch_baseline.csv"))
+        if (any(finite_frac < 1)) {
+          cli::cli_alert_warning(
+            "  Catch baseline written, but only {round(100 * min(finite_frac))}% of draws were finite -- treat it as provisional."
+          )
+        } else {
+          cli::cli_alert_success("  Catch baseline written for est_cg '{chosen_ecg}'.")
+        }
+      }
+    }
+  }, fatal = FALSE)
 
   # A catch-group re-fit exists to produce the baseline above and nothing else.
   # Writing its `b` into bss_b_summary.csv would duplicate every series and
