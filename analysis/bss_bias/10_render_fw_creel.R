@@ -91,7 +91,12 @@ BASE_PARAMS <- list(
   # REQUIRED. With save_draws FALSE, fw_creel deletes
   # estimates_bss[[ecg]]$draws and $season_results before writing the file, so
   # 09_read_production_estimates.R would find no C_sum, E_sum or b to read.
-  save_draws                    = TRUE
+  save_draws                    = TRUE,
+  # Skips every plot and table chunk: fetch, prep, sample, save, nothing else.
+  # Faster, and it removes the rendering steps that can fail AFTER a fit has
+  # completed -- the trace plot in particular aborts on the NaN generated
+  # quantities a low-catch group produces.
+  fit_only                      = TRUE
 )
 
 # Per-fishery overrides, keyed on exact fishery_name. Anything here wins over
