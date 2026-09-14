@@ -1009,6 +1009,15 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
 
   # --- Fit ------------------------------------------------------------------
 
+  # Persisted with the fit so a diagnostic can read the EXACT vectors the model
+  # saw -- `c` (fish per interview) and `h` (person-hours) -- instead of
+  # recomputing observed CPUE from raw tables and reproducing the prep chain
+  # slightly differently. Under CATCH_BASELINE_ONLY the function returns before
+  # the stanfit save below, so this sits here rather than beside it.
+  if (SAVE_FITS) {
+    saveRDS(inputs_bss, file.path(FITS_DIR, paste0(safe_name(out_name), "__inputs.rds")))
+  }
+
   cfg <- FIT_CONFIGS[[fit_config_name]]
   t0 <- Sys.time()
   bss_fit <- run_stage("fit_bss", {

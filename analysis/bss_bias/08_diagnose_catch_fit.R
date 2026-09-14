@@ -27,8 +27,10 @@
 #     DIAG_GROUP   <- "chinook_all"        # chinook_all | coho_harvest
 #     DIAG_CONFIG  <- "prod"               # smoke | lite | quick | prod
 #
-#   Keeps the full stanfit in outputs/fits/ (gitignored) so the object is
-#   available afterwards as `diag_fit` for anything this script does not print.
+#   Keeps the full stanfit AND the Stan input list in outputs/fits/ (gitignored),
+#   available afterwards as `diag_fit` and `diag_inp`. Observed CPUE is taken
+#   from diag_inp$c and diag_inp$h -- the exact vectors the model was handed --
+#   so the comparison cannot drift from what was actually fitted.
 # ==============================================================================
 
 library(tidyverse)
@@ -54,33 +56,7 @@ cli::cli_alert_info("Group:   {.val {ecg}}")
 cli::cli_alert_info("Config:  {.val {DIAG_CONFIG}}")
 
 # ------------------------------------------------------------------------------
-# 1. Observed CPUE, straight from the interviews -- no model involved
-# ------------------------------------------------------------------------------
-
-est_dates <- resolve_window(DIAG_FISHERY)
-if (is.null(est_dates)) cli::cli_abort("No estimation window for {.val {DIAG_FISHERY}}.")
-dwg <- fetch_fishery_dwg(DIAG_FISHERY, est_dates)
-
-hit <- match_catch_group(dwg$catch, grp)
-obs_fish <- sum(suppressWarnings(as.numeric(as.character(hit$fish_count))), na.rm = TRUE)
-
-# Interview fishing time. Column naming has varied, so take the first that is
-# present rather than assuming one.
-time_col <- intersect(c("fishing_time_total", "fishing_time", "trip_time_total"),
-                      names(dwg$interview))
-if (length(time_col) == 0) {
-  cli::cli_abort("No fishing-time column found in dwg$interview: {.val {names(dwg$interview)}}")
-}
-obs_hours <- sum(suppressWarnings(as.numeric(dwg$interview[[time_col[1]]])), na.rm = TRUE)
-obs_cpue  <- obs_fish / obs_hours
-
-cli::cli_h2("Observed, from interviews only")
-cli::cli_alert_info("Fish of this group:   {round(obs_fish)}")
-cli::cli_alert_info("Angler hours ({time_col[1]}): {round(obs_hours)}")
-cli::cli_alert_info("Observed CPUE:        {signif(obs_cpue, 3)} fish/hour")
-
-# ------------------------------------------------------------------------------
-# 2. Fit, reusing 01's machinery exactly -- same preps, same preflight, same
+# 1. Fit, reusing 01's machinery exactly -- same preps, same preflight, same
 #    priors. Nothing here is a parallel implementation.
 # ------------------------------------------------------------------------------
 
@@ -88,16 +64,47 @@ CATCH_BASELINE_ONLY <- TRUE
 RUN_CATCH_GROUP     <- grp
 ONLY_FISHERIES      <- DIAG_FISHERY
 FIT_CONFIG_NAME     <- DIAG_CONFIG
-SAVE_FITS           <- TRUE        # keep the stanfit so it can be interrogated
+SAVE_FITS           <- TRUE        # keeps the stanfit AND the Stan inputs
 
 source(here::here("analysis", "bss_bias", "01_fit_bss_bias.R"), local = FALSE)
 
-fit_path <- file.path(here::here("analysis", "bss_bias", "outputs", "fits"),
-                      paste0(safe_name(DIAG_FISHERY), ".rds"))
+FITS_DIR_D <- here::here("analysis", "bss_bias", "outputs", "fits")
+fit_path   <- file.path(FITS_DIR_D, paste0(safe_name(DIAG_FISHERY), ".rds"))
+inp_path   <- file.path(FITS_DIR_D, paste0(safe_name(DIAG_FISHERY), "__inputs.rds"))
 if (!file.exists(fit_path)) {
   cli::cli_abort("No stanfit at {.file {fit_path}} -- the fit did not complete. Read the ledger.")
 }
-diag_fit <- readRDS(fit_path)
+diag_fit  <- readRDS(fit_path)
+diag_inp  <- if (file.exists(inp_path)) readRDS(inp_path) else NULL
+
+# ------------------------------------------------------------------------------
+# 2. Observed CPUE -- from the EXACT vectors the model was handed
+#
+# `c` is fish per interview and `h` is person-hours (fishing_time *
+# person_count_final; prep_inputs_bss line 155), so sum(c)/sum(h) is the
+# observed catch rate in the same units as lambda_C. Taking these from the
+# saved inputs rather than recomputing from dwg$interview matters: the raw
+# interview table carries fishing_start_time / fishing_end_time, not a fishing
+# time, and reproducing the prep chain here would risk a number that differs
+# from what the model actually fitted -- which is precisely the comparison
+# being made.
+# ------------------------------------------------------------------------------
+
+if (is.null(diag_inp) || is.null(diag_inp$c) || is.null(diag_inp$h)) {
+  cli::cli_abort(c(
+    "No saved Stan inputs at {.file {inp_path}}.",
+    "i" = "01_fit_bss_bias.R writes these when SAVE_FITS is TRUE -- re-pull and re-run."
+  ))
+}
+obs_fish  <- sum(diag_inp$c, na.rm = TRUE)
+obs_hours <- sum(diag_inp$h, na.rm = TRUE)
+obs_cpue  <- obs_fish / obs_hours
+
+cli::cli_h2("Observed, from the interviews the model was given")
+cli::cli_alert_info("Interviews with CPUE data (IntC): {diag_inp$IntC}")
+cli::cli_alert_info("Fish of this group:  {round(obs_fish)}")
+cli::cli_alert_info("Person-hours:        {round(obs_hours)}")
+cli::cli_alert_info("Observed CPUE:       {signif(obs_cpue, 4)} fish/person-hour")
 
 # ------------------------------------------------------------------------------
 # 3. What the model says
@@ -154,10 +161,10 @@ cpue_ratio <- model_cpue / obs_cpue
 
 cli::cli_h2("Verdict")
 cat(sprintf(
-  "  observed CPUE   %10.4f fish/hour   (%d fish / %d hours, interviews only)\n",
+  "  observed CPUE   %10.4f fish/person-hour   (%d fish / %d person-hours)\n",
   obs_cpue, round(obs_fish), round(obs_hours)
 ))
-cat(sprintf("  model CPUE      %10.4f fish/hour   (C_sum / E_sum)\n", model_cpue))
+cat(sprintf("  model CPUE      %10.4f fish/person-hour   (C_sum / E_sum)\n", model_cpue))
 cat(sprintf("  ratio           %10.1fx\n\n", cpue_ratio))
 
 if (!is.finite(cpue_ratio)) {
