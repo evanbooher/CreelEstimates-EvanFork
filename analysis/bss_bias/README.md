@@ -218,6 +218,41 @@ affects the creel estimates themselves and not just this work.
    `source("analysis/bss_bias/01b_fit_catch_groups.R")`. Narrow it first with
    `GROUP_KEY` / `FISHERY_RE` / `YEARS_MODE` if wanted.
 
+## Reproducing this outside WDFW
+
+External collaborators can run the whole analysis without VPN or WDFW
+credentials. `DATA_SOURCE <- "external"` in `fishery_data.R` reads the public
+`data.wa.gov` creel dataset, and the three lookups the pipeline needs
+(`fishery_params.csv`, `fishery_location_lut.csv`, `fishery_labels.csv`) are
+committed under `lookup/`.
+
+**What is committed, and why it matters:** everything under `outputs/` except
+`fits/` and `cache/`. That includes `bss_b_summary.csv`, the raw posterior
+draws in `b_draws/`, the comparability and stan-dims tables, and every
+T-numbered result. With those in hand:
+
+| To run | You need | Time |
+|---|---|---|
+| `06_variability_analysis.R`, `07_catch_sensitivity.R` | the committed CSVs + `b_draws/` | seconds |
+| `02a`, `02b` | the committed lookups + a DWG fetch | minutes |
+| `01_fit_bss_bias.R`, `01b_fit_catch_groups.R` | a Stan toolchain | hours |
+
+So the analysis and the figures reproduce immediately; only the fits are
+expensive, and their outputs are committed so nobody has to repeat them to
+check the reasoning.
+
+**`fishery_discovery_target.csv` is committed on purpose.** `00_discover_fisheries.R`
+regenerates it from public data, but its `include_in_run` column is edited by
+hand -- which fishery-years are in scope is a judgement call, not something the
+script derives. Committing it is what makes the scope reproducible rather than
+merely re-derivable to something slightly different. Re-running `00` will
+overwrite those edits; check the diff before committing over it.
+
+**The DWG cache is not committed** (`outputs/cache/`). It is a local copy of
+public records and any clone re-fetches it on first run -- slower, but it keeps
+tens of megabytes of redundant data out of the repo and guarantees a
+collaborator is reading the live public dataset rather than our snapshot of it.
+
 ## Public-data path -- confirmed working, VPN not required
 
 **Checked locally (VPN off):** `creelutils::fetch_data(fishery_name = "Skagit

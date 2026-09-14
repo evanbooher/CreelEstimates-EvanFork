@@ -53,10 +53,18 @@ config.yml
 .devcontainer/
 .devcontainer
 
-# BSS effort-bias analysis: full stanfit objects are large; the CSVs, gt
-# HTML tables, figures, and raw b draws are the actual deliverable and stay
-# tracked. See analysis/bss_bias/README.md.
+# BSS effort-bias analysis. Two things are deliberately NOT tracked -- full
+# stanfit objects, which are large, and the DWG fetch cache, which is a local
+# copy of public data.wa.gov records that any clone can re-fetch.
+#
+# EVERYTHING ELSE UNDER outputs/ IS TRACKED ON PURPOSE. The CSVs, the gt HTML
+# tables, the figures and the raw b draws are what let a collaborator run
+# 06_variability_analysis.R and 07_catch_sensitivity.R in seconds instead of
+# re-running every Stan fit -- and what lets them check our numbers against
+# their own rather than take them on faith. They are the deliverable, not
+# intermediate files.
 /analysis/bss_bias/outputs/fits/
+/analysis/bss_bias/outputs/cache/
 
 # Stray exports written to the repo root by ad-hoc data pulls -- not inputs to
 # anything in the pipeline, and they clutter the commit pane on every run.
