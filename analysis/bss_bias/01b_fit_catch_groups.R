@@ -126,6 +126,18 @@ if (identical(years_mode, "latest")) {
 
 targets <- sort(unique(disc$fishery_name))
 
+# Announce this process's PID so 01b_launch_jobs.R's job_kill() can stop these
+# runs specifically, rather than taskkill-ing every Rscript on the machine.
+# Written here rather than captured by the launcher because system2(wait =
+# FALSE) returns no PID. Removed on clean completion; a stale file left by a
+# crash is harmless, job_kill() skips PIDs that are no longer running.
+JOB_PID_FILE <- file.path(
+  here::here("analysis", "bss_bias", "outputs", "logs"),
+  sprintf("01b_%s.pid", gsub("[^[:alnum:]]+", "_", paste(group_key, fishery_re, sep = "_")))
+)
+dir.create(dirname(JOB_PID_FILE), recursive = TRUE, showWarnings = FALSE)
+writeLines(as.character(Sys.getpid()), JOB_PID_FILE)
+
 cli::cli_h1("01b -- catch-group baseline fits")
 cli::cli_alert_info("Catch group{?s}: {.val {keys}}")
 # Two calls on purpose: a cli string may carry only ONE quantity when it also
@@ -155,6 +167,8 @@ for (k in keys) {
   OUTPUT_TAG <- gsub("[^[:alnum:]]+", "_", paste(k, fishery_re, sep = "_"))
   source(here::here("analysis", "bss_bias", "01_fit_bss_bias.R"), local = FALSE)
 }
+
+unlink(JOB_PID_FILE)
 
 cli::cli_alert_success(
   "Done. 07_catch_sensitivity.R will pick up {.file bss_catch_baseline.csv} automatically."

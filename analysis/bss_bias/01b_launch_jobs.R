@@ -55,14 +55,23 @@ if (!file.exists(SCRIPT)) stop("Not found: ", SCRIPT)
 RSCRIPT <- file.path(R.home("bin"), if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript")
 if (!file.exists(RSCRIPT)) stop("Could not locate Rscript at: ", RSCRIPT)
 
-job_log <- function(job) {
-  file.path(LOG_DIR, sprintf("01b_%s_%s.log", job[["group"]], job[["fisheries"]]))
+# One sanitised key per job, shared by the log and PID filenames -- and by
+# 01b_fit_catch_groups.R, which derives the same name for its own PID file.
+# Sanitised because a fisheries filter is a REGEX: "Snohomish|Stillaguamish"
+# is a legitimate value and a pipe is not a legal Windows filename character.
+job_key <- function(job) {
+  gsub("[^[:alnum:]]+", "_", paste(job[["group"]], job[["fisheries"]], sep = "_"))
 }
+
+job_log <- function(job) file.path(LOG_DIR, paste0("01b_", job_key(job), ".log"))
+job_pid_file <- function(job) file.path(LOG_DIR, paste0("01b_", job_key(job), ".pid"))
 
 launch_one <- function(job) {
   log_path <- job_log(job)
-  # Truncate any previous log so a re-run is not read as still-running output.
+  # Truncate any previous log so a re-run is not read as still-running output,
+  # and clear any stale PID file from a crashed run.
   cat("", file = log_path)
+  unlink(job_pid_file(job))
   system2(
     RSCRIPT,
     args   = c(shQuote(SCRIPT), job[["group"]], shQuote(job[["fisheries"]]), YEARS_MODE),
@@ -92,6 +101,7 @@ invisible(lapply(JOBS, launch_one))
 message("\nAll jobs launched in the background. The Console is free.")
 message("Watch one with:   job_tail(1)")
 message("Check them all:   job_status()")
+message("Stop them with:   job_kill()")
 message("\n07_catch_sensitivity.R does NOT wait on these -- run it now:")
 message("  Rscript analysis/bss_bias/07_catch_sensitivity.R")
 
@@ -105,9 +115,10 @@ job_tail <- function(i = 1, n = 25) {
   cat(tail(readLines(p, warn = FALSE), n), sep = "\n")
 }
 
-# A job is "done" once 01b prints its closing line; anything else with recent
-# output is still running. Deliberately crude -- it reads the log, it does not
-# track the OS process, so a crashed job shows as "running" until you look.
+# A job is "done" once 01b prints its closing line. `running` comes from the
+# PID file and an actual liveness check, so a job that crashed shows as neither
+# done nor running -- which is the case worth noticing, and the one an
+# earlier log-only version of this could not distinguish.
 job_status <- function() {
   data.frame(
     group     = vapply(JOBS, function(j) j[["group"]], ""),
@@ -120,10 +131,68 @@ job_status <- function() {
       if (!file.exists(p)) return(FALSE)
       any(grepl("will pick up", readLines(p, warn = FALSE), fixed = TRUE))
     }, logical(1)),
+    running   = vapply(seq_along(JOBS), function(k) pid_alive(job_pid(k)), logical(1)),
     modified  = vapply(JOBS, function(j) {
       p <- job_log(j)
       if (file.exists(p)) format(file.info(p)$mtime, "%H:%M:%S") else NA_character_
     }, ""),
     stringsAsFactors = FALSE
   )
+}
+
+# Is this PID actually alive? Used by both job_status() and job_kill() so a
+# stale PID file from a crashed run is never reported as running, and never
+# passed to a kill command that would then error.
+pid_alive <- function(pid) {
+  if (is.na(pid)) return(FALSE)
+  if (.Platform$OS.type == "windows") {
+    out <- suppressWarnings(system2(
+      "tasklist", c("/FI", shQuote(sprintf("PID eq %s", pid)), "/NH"),
+      stdout = TRUE, stderr = NULL
+    ))
+    any(grepl(as.character(pid), out, fixed = TRUE))
+  } else {
+    !inherits(try(tools::pskill(pid, 0), silent = TRUE), "try-error")
+  }
+}
+
+job_pid <- function(i) {
+  p <- job_pid_file(JOBS[[i]])
+  if (!file.exists(p)) return(NA_integer_)
+  suppressWarnings(as.integer(readLines(p, warn = FALSE)[1]))
+}
+
+# Stop the jobs THIS launcher started -- not every Rscript on the machine.
+# `taskkill /IM Rscript.exe` would also take out any unrelated R job, and on a
+# machine running a long backfill that is an expensive mistake.
+#
+#   job_kill()     all jobs
+#   job_kill(2)    just job 2
+job_kill <- function(i = seq_along(JOBS)) {
+  for (k in i) {
+    job <- JOBS[[k]]
+    pid <- job_pid(k)
+    label <- sprintf("%s / %s", job[["group"]], job[["fisheries"]])
+    if (is.na(pid)) {
+      message(sprintf("no PID file  %-30s (finished, or never started)", label))
+      next
+    }
+    if (!pid_alive(pid)) {
+      message(sprintf("not running  %-30s (pid %s -- stale file, removing)", label, pid))
+      unlink(job_pid_file(job))
+      next
+    }
+    ok <- if (.Platform$OS.type == "windows") {
+      system2("taskkill", c("/F", "/PID", pid), stdout = FALSE, stderr = FALSE)
+    } else {
+      system2("kill", c("-9", pid), stdout = FALSE, stderr = FALSE)
+    }
+    if (identical(as.integer(ok), 0L)) {
+      message(sprintf("killed       %-30s (pid %s)", label, pid))
+      unlink(job_pid_file(job))
+    } else {
+      message(sprintf("KILL FAILED  %-30s (pid %s) -- end it in Task Manager", label, pid))
+    }
+  }
+  invisible(NULL)
 }
