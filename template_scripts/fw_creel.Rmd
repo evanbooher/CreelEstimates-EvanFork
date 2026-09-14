@@ -25,6 +25,7 @@ params:
   export: "local"
   export_tables: "both"
   enable_cache: FALSE  # Set to FALSE to disable all caching (useful when cached files become too large)
+  save_draws: FALSE  # TRUE keeps posterior draws in estimates_bss.rds (needed by any downstream analysis that reads C_sum/E_sum/b)
 output:
   html_document:
     toc: true
@@ -896,7 +897,11 @@ saveRDS(inputs_bss, file.path(outputs_folders$inputs, "inputs_bss.rds"))
 
 # ---- CONFIGURATION ----
 # Set to TRUE to save draw objects (WARNING: large file sizes)
-save_draws <- FALSE  # Change to TRUE if you want to save draws
+# Now a param (default FALSE, unchanged for an ordinary render). It has to be
+# TRUE for anything downstream that reads posterior draws: with it FALSE this
+# chunk deletes estimates_bss[[ecg]]$draws and $season_results before the file
+# is written, so estimates_bss.rds arrives with no C_sum, E_sum or b at all.
+save_draws <- isTRUE(params$save_draws)
 # ----------------------
 
 # create empty lists for outputs

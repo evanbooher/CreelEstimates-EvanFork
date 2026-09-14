@@ -87,7 +87,11 @@ BASE_PARAMS <- list(
   data_grade                    = "provisional",
   export                        = "local",
   export_tables                 = "both",
-  enable_cache                  = FALSE
+  enable_cache                  = FALSE,
+  # REQUIRED. With save_draws FALSE, fw_creel deletes
+  # estimates_bss[[ecg]]$draws and $season_results before writing the file, so
+  # 09_read_production_estimates.R would find no C_sum, E_sum or b to read.
+  save_draws                    = TRUE
 )
 
 # Per-fishery overrides, keyed on exact fishery_name. Anything here wins over
