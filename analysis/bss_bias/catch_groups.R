@@ -20,14 +20,26 @@ CATCH_GROUPS <- list(
   # Any encounter of Chinook -- adults and jacks, every mark status including
   # unknown and unrecorded, kept and released.
   #
-  # DO NOT DROP THIS GROUP ON SAMPLE SIZE. 00d shows single-digit Chinook
-  # encounters in most fishery-years and zero in three, which looks like a
-  # group not worth fitting. It is not: in Stillaguamish the low-count years
-  # are the ones that decide whether the fishery continues at all. The question
-  # there is whether an incidental-impact estimate EXISTS and what its upper
-  # bound is -- a management threshold, not a precision problem. An estimate
-  # built on one encounter is wide and still decision-relevant; report it with
-  # its interval, never as a point.
+  # DO NOT DROP THIS GROUP ON SAMPLE SIZE, IN ANY BASIN. 00d shows single-digit
+  # Chinook encounters in most fishery-years and zero in three, which makes this
+  # look like a group not worth fitting. That reasoning is a category error.
+  #
+  # Chinook encounters are an IMPACT-LIMITED quantity: the management question
+  # is whether an incidental-impact estimate exists and what its upper bound is,
+  # against a threshold that decides whether a fishery opens or continues. That
+  # is not a precision problem, and a small n is not a reason to skip it -- in
+  # Snohomish and Stillaguamish alike, the low-count years are exactly the ones
+  # the decision turns on. A coho series with 400 fish is statistically
+  # comfortable and decides much less.
+  #
+  # Two consequences for how these get reported:
+  #   - Always with an interval, never as a point. A C_sum built on one
+  #     encounter has a very wide posterior and the UPPER bound is the
+  #     decision-relevant end. A median quoted alone reads as a precise small
+  #     number when it means "possibly near zero, possibly a good deal more".
+  #   - A fishery-year with zero encounters is a real and reportable result,
+  #     not a missing one. 01 skips it at the "no matching records" guard, so
+  #     the absence must be carried over from 00d by hand.
   chinook_all = list(
     species    = "Chinook",
     life_stage = "Adult|Jack",
