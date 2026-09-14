@@ -821,18 +821,43 @@ map(
 ### Create BSS input object 
 
 ```{r prep_inputs_bss, eval=TRUE, cache=params$enable_cache, dependson="prep_dwg_summ_shared_summary_objects", cache.extra=param_hash}
+# --- BSS input repair (R_functions/bss_input_fixes.R) -------------------------
+# prep_inputs_bss() takes DIMENSIONS as counts (S = length(unique(...))) but
+# INDICES as raw values (section_V = section_num). Those agree only when
+# sections are a dense 1..S -- Stillaguamish is 1-6 and 8, which makes Stan
+# abort with "index 7 out of range". angler_final_int has the same shape of
+# problem: it is computed positionally, so a stray label becomes a third
+# angler type (G = 3) against a likelihood that hard-codes two, or bank and
+# boat land on the wrong numbers silently.
+#
+# Applied to BSS-LOCAL COPIES so the PE model above keeps the untouched
+# dwg_summ and dwg$days -- this changes nothing about the PE estimates. Both
+# are identity transforms on well-formed data, so a fishery-year that fits
+# today fits identically after this.
+bss_fixed    <- apply_bss_input_fixes(dwg_summ, dwg$days, params$fishery_name)
+dwg_summ_bss <- bss_fixed$dwg_summ
+days_bss     <- bss_fixed$days
+
+if (any(bss_fixed$map$section_num_src != bss_fixed$map$section_num_bss) ||
+    nzchar(bss_fixed$map$sections_dropped[1])) {
+  cli::cli_alert_warning("BSS section numbering was realigned for this fishery:")
+  print(bss_fixed$map)
+}
+saveRDS(bss_fixed$map, file.path(outputs_folders$inputs, "bss_section_map.rds"))
+# -----------------------------------------------------------------------------
+
 #either a single element list for a single catch_group
 #or a list of bss-input-lists, one for each catch_group
 inputs_bss <- 
-  unique(na.omit(dwg_summ$interview$est_cg)) |> 
+  unique(na.omit(dwg_summ_bss$interview$est_cg)) |> 
   set_names() |> 
   map(
     ~prep_inputs_bss(
       est_catch_group = .x,
       period = params$period_bss,
-      days = dwg$days,
-      dwg_summarized = dwg_summ,
-      census_expan = dwg_summ$census_expan, 
+      days = days_bss,
+      dwg_summarized = dwg_summ_bss,
+      census_expan = dwg_summ_bss$census_expan, 
       study_design = params$study_design, 
       priors = c(
         value_cauchyDF_sigma_eps_C = 0.5,
@@ -854,6 +879,11 @@ inputs_bss <-
     )
     )
   )
+
+# Catch what survived the repair above -- an out-of-range index or a p_TI/G/S
+# mismatch reported here names the fishery and the cause; the same failure from
+# inside the sampler does not.
+iwalk(inputs_bss, ~preflight_bss_inputs(.x, paste0(params$fishery_name, " / ", .y)))
 
 # Save BSS inputs
 saveRDS(inputs_bss, file.path(outputs_folders$inputs, "inputs_bss.rds"))
@@ -886,8 +916,8 @@ for(ecg in names(inputs_bss)) {
       bss_inputs_list = inputs_bss[[ecg]],
       n_chain = 2,  
       n_cores = 2,
-      n_iter = 50,
-      n_warmup = 25,
+      n_iter = 300,
+      n_warmup = 150,
       n_thin = 1,
       adapt_delta = 0.7,
       max_treedepth = 12,
