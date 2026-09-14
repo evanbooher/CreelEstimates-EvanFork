@@ -39,15 +39,16 @@
 #   narrow it, set any of these first (they persist between sources -- reset
 #   them or restart R to change a run):
 #
-#     GROUP_KEY  <- "chinook_all"          # chinook_all | coho_harvest | all
-#     FISHERY_RE <- "Snohomish"            # regex over fishery_name
-#     YEARS_MODE <- "latest"               # latest | all
+#     GROUP_KEY   <- "chinook_all"         # chinook_all | coho_harvest | all
+#     FISHERY_RE  <- "Snohomish"           # regex over fishery_name
+#     YEARS_MODE  <- "latest"              # latest | all
+#     FIT_CONFIG  <- "lite"                # lite (default) | quick | prod | smoke
 #
 # Usage -- from a shell, optionally several at once:
 #   Rscript analysis/bss_bias/01b_fit_catch_groups.R <group> [fishery-regex] [years]
 #
-#   FIT_CONFIGS$quick uses 2 chains on 2 cores. Fits run one after another, so
-#   allow roughly 20-30 minutes each.
+#   Fits run one after another. FIT_CONFIGS$lite (the default here) is a
+#   fraction of "quick" -- time one before committing to a full sweep.
 #
 #   RUN IT SERIALLY. 01's append_csv_row() reads the whole CSV, drops the
 #   current fishery's row and rewrites the file. Two runs at once will have one
@@ -144,7 +145,10 @@ cli::cli_alert_info("{.val {targets}}")
 
 CATCH_BASELINE_ONLY <- TRUE
 ONLY_FISHERIES      <- targets
-FIT_CONFIG_NAME     <- "quick"
+# "lite" by default: see FIT_CONFIGS in 01 for why a light fit is defensible
+# here specifically. Override by setting FIT_CONFIG before sourcing.
+if (!exists("FIT_CONFIG", inherits = FALSE)) FIT_CONFIG <- "lite"
+FIT_CONFIG_NAME     <- FIT_CONFIG
 
 for (k in keys) {
   cli::cli_h2("Catch group: {k}")

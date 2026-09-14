@@ -176,6 +176,15 @@ MONITOR_PARS <- c(
 FIT_CONFIGS <- list(
   smoke = list(n_chain = 1, n_cores = 1, n_iter = 60,   n_warmup = 30,   n_thin = 1, adapt_delta = 0.70, max_treedepth = 10),
   quick = list(n_chain = 2, n_cores = 2, n_iter = 600,  n_warmup = 300,  n_thin = 1, adapt_delta = 0.80, max_treedepth = 11),
+  # For CATCH_BASELINE_ONLY runs, where the deliverable is a season-total
+  # SCALAR and not `b`. Light is defensible there for a specific reason: `b` is
+  # invariant to the catch group, so these fits contribute nothing to the b
+  # series -- the precision of the sensitivity result still comes from the
+  # full-quality b draws already in outputs/b_draws/. Only C_sum's central
+  # value is wanted, and 200 draws across 2 chains estimates a median
+  # adequately while still yielding a usable rhat (1 chain would not).
+  # Do NOT use this config for a b-producing run.
+  lite  = list(n_chain = 2, n_cores = 2, n_iter = 200,  n_warmup = 100,  n_thin = 1, adapt_delta = 0.80, max_treedepth = 10),
   prod  = list(n_chain = 4, n_cores = 4, n_iter = 2000, n_warmup = 1000, n_thin = 1, adapt_delta = 0.95, max_treedepth = 13)
 )
 if (!exists("FIT_CONFIG_NAME", inherits = FALSE)) FIT_CONFIG_NAME <- "quick"   # <-- default is the fast/throwaway config; change to "quick" once smoke passes, "prod" for backfill later

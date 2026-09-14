@@ -19,6 +19,15 @@
 CATCH_GROUPS <- list(
   # Any encounter of Chinook -- adults and jacks, every mark status including
   # unknown and unrecorded, kept and released.
+  #
+  # DO NOT DROP THIS GROUP ON SAMPLE SIZE. 00d shows single-digit Chinook
+  # encounters in most fishery-years and zero in three, which looks like a
+  # group not worth fitting. It is not: in Stillaguamish the low-count years
+  # are the ones that decide whether the fishery continues at all. The question
+  # there is whether an incidental-impact estimate EXISTS and what its upper
+  # bound is -- a management threshold, not a precision problem. An estimate
+  # built on one encounter is wide and still decision-relevant; report it with
+  # its interval, never as a point.
   chinook_all = list(
     species    = "Chinook",
     life_stage = "Adult|Jack",
