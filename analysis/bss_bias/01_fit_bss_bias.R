@@ -173,6 +173,22 @@ MONITOR_PARS <- c(
   "E_sum", "C_sum"
 )
 
+# Guard against a "lite" setting leaking across runs in one R session. These
+# knobs use the exists() idiom so 01b can set them before sourcing this file --
+# which also means they PERSIST. Sourcing 01 directly after an 01b run would
+# otherwise silently refit `b` at catch-baseline quality, degrading the exact
+# series everything downstream rests on, with nothing in the output saying so.
+check_fit_config <- function() {
+  if (identical(FIT_CONFIG_NAME, "lite") && !isTRUE(CATCH_BASELINE_ONLY)) {
+    cli::cli_abort(c(
+      "FIT_CONFIG_NAME is {.val lite} but this is a b-producing run.",
+      "x" = "{.val lite} exists only for CATCH_BASELINE_ONLY fits -- 200 draws is not a b estimate.",
+      "i" = "Left over from an {.file 01b_fit_catch_groups.R} run in this session?",
+      "i" = "Fix with {.code FIT_CONFIG_NAME <- \"quick\"}, or restart R."
+    ))
+  }
+}
+
 FIT_CONFIGS <- list(
   smoke = list(n_chain = 1, n_cores = 1, n_iter = 60,   n_warmup = 30,   n_thin = 1, adapt_delta = 0.70, max_treedepth = 10),
   quick = list(n_chain = 2, n_cores = 2, n_iter = 600,  n_warmup = 300,  n_thin = 1, adapt_delta = 0.80, max_treedepth = 11),
@@ -1093,6 +1109,8 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
 # ------------------------------------------------------------------------------
 # Driver: read discovery output, filter to include_in_run, run with ledger
 # ------------------------------------------------------------------------------
+
+check_fit_config()
 
 discovery_path <- file.path(OUT_DIR, "fishery_discovery_target.csv")
 if (!file.exists(discovery_path)) {
