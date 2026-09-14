@@ -84,8 +84,12 @@
 #   bss_b_T5_ladder.csv         -- deterministic b -> catch multiplier, empirical tiers + round ladder
 #   bss_b_T6_loo_backtest.csv   -- LOO backtest: ratio distribution per fishery-year x bias type
 #   bss_b_T6_calibration.csv    -- per-series PI coverage, the [S5] check
+#   bss_b_T7_direct_sensitivity.csv -- vary b on a real fitted dataset, read off
+#                                      the catch: multiplier, % change, and fish
+#                                      where a C_sum baseline exists
 #   fig17_catch_ladder.png/.pdf
 #   fig18_loo_backtest.png/.pdf
+#   fig19_direct_sensitivity.png/.pdf
 # ==============================================================================
 
 library(tidyverse)
@@ -282,6 +286,92 @@ T5 <- bind_rows(ladder_emp, ladder_round) |>
 
 write_csv(T5, file.path(OUT_DIR, "bss_b_T5_ladder.csv"))
 cli::cli_alert_success("T5 ladder written ({nrow(T5)} rows).")
+
+# ------------------------------------------------------------------------------
+# T7 -- THE DIRECT SENSITIVITY: vary b on a real dataset, read off the catch
+#
+# The plainest form of the question. Take a fishery-year that has actually been
+# fitted, hold everything else at what that fit produced, and swap `b` for a
+# range of values. Because catch goes exactly as 1/b, no re-fitting is needed:
+#
+#     catch(b_alt) = C_sum(fitted) * b_fitted / b_alt
+#
+# The anchor is that fishery-year's OWN fitted b, not 1 -- C_sum came out of a
+# fit that used b_fitted, so that is the point the curve passes through.
+#
+# Tiers are both the round ladder (readable, basin-agnostic) and the series'
+# own T2 prediction bounds (what b could actually plausibly be here).
+#
+# CAVEAT, and it is the same one T4 records: this scales the b for ONE
+# likelihood type. The clean 1/b holds when every live index channel's b moves
+# together, or when only one channel is in use. Scale b[1] alone in a fishery
+# that also runs trailer counts and the trailer channel resists, so the true
+# effect is somewhat smaller than shown. Read T4 alongside this.
+# ------------------------------------------------------------------------------
+
+b_fitted <- dat |>
+  filter(!is.na(median), median > 0) |>
+  select(fishery_name, basin, fishery_type, year_start, bias_type,
+         b_fitted = median, informed, informed_flag)
+
+series_bounds <- T2 |>
+  select(basin, fishery_type, bias_type, pi_lb, pooled_b, pi_ub)
+
+# One row per fishery-year x bias type x tier.
+tier_grid <- b_fitted |>
+  left_join(series_bounds, by = c("basin", "fishery_type", "bias_type")) |>
+  mutate(round_tiers = list(ROUND_LADDER)) |>
+  rowwise() |>
+  mutate(b_values = list(c(
+    stats::setNames(ROUND_LADDER, paste0("b = ", ROUND_LADDER)),
+    stats::setNames(c(pi_lb, pooled_b, pi_ub),
+                    c("series PI low", "series predicted", "series PI high")),
+    stats::setNames(b_fitted, "as fitted")
+  ))) |>
+  ungroup() |>
+  select(-round_tiers) |>
+  mutate(tier = map(b_values, names), b_alt = map(b_values, unname)) |>
+  select(-b_values) |>
+  unnest(c(tier, b_alt)) |>
+  filter(!is.na(b_alt), b_alt > 0)
+
+T7 <- tier_grid |>
+  mutate(
+    tier_kind = case_when(
+      tier == "as fitted"          ~ "anchor",
+      str_starts(tier, "series")   ~ "empirical",
+      TRUE                          ~ "round"
+    ),
+    catch_multiplier = b_fitted / b_alt,
+    pct_change_catch = 100 * (catch_multiplier - 1),
+    direction = case_when(
+      abs(catch_multiplier - 1) < 1e-9 ~ "no change",
+      catch_multiplier > 1             ~ "catch UP",
+      TRUE                             ~ "catch DOWN"
+    )
+  )
+
+# In fish, wherever a C_sum baseline exists. One ratio row becomes one row per
+# catch group, because the multiplier is identical across groups.
+if (!is.null(catch_base) && all(c("fishery_name", "est_cg", "C_sum_median") %in% names(catch_base))) {
+  T7 <- T7 |>
+    left_join(catch_base |> select(fishery_name, est_cg, C_sum_median),
+              by = "fishery_name", relationship = "many-to-many") |>
+    mutate(catch_estimate = C_sum_median * catch_multiplier)
+} else {
+  T7 <- T7 |> mutate(est_cg = NA_character_, C_sum_median = NA_real_,
+                     catch_estimate = NA_real_)
+}
+
+T7 <- T7 |>
+  select(basin, fishery_type, fishery_name, year_start, bias_type,
+         tier, tier_kind, b_fitted, b_alt, catch_multiplier, pct_change_catch,
+         direction, est_cg, catch_baseline = C_sum_median, catch_estimate,
+         informed_flag) |>
+  arrange(basin, fishery_type, year_start, bias_type, b_alt)
+
+write_csv(T7, file.path(OUT_DIR, "bss_b_T7_direct_sensitivity.csv"))
+cli::cli_alert_success("T7 direct sensitivity written ({nrow(T7)} rows).")
 
 # ------------------------------------------------------------------------------
 # T6 -- the leave-one-out backtest  [S1] [S2]
@@ -533,7 +623,52 @@ fig18 <- ggplot(fig18_df, aes(x = factor(year_start), y = ratio_median, color = 
 
 save_fig(fig18, "fig18_loo_backtest", width = 11, height = 7)
 
+# fig19 -- the direct sensitivity. One line per fishery-year showing catch
+# against b, with that series' plausible b range shaded. This is the figure for
+# "what does changing b do", and it is deliberately the simplest one here.
+fig19_df <- T7 |>
+  filter(tier_kind == "round") |>
+  distinct(basin, fishery_type, year_start, bias_type, b_alt, catch_multiplier)
+
+band_df <- T7 |>
+  filter(tier_kind == "empirical") |>
+  distinct(basin, fishery_type, bias_type, tier, b_alt) |>
+  pivot_wider(names_from = tier, values_from = b_alt) |>
+  rename(lo = `series PI low`, hi = `series PI high`)
+
+fig19 <- ggplot(fig19_df, aes(b_alt, catch_multiplier, group = year_start)) +
+  geom_rect(data = band_df, inherit.aes = FALSE,
+            aes(xmin = lo, xmax = hi, ymin = -Inf, ymax = Inf),
+            fill = GRID_COLOR, alpha = 0.55) +
+  geom_hline(yintercept = 1, color = BASELINE_COL, linewidth = 0.4) +
+  geom_line(aes(color = bias_type), linewidth = 0.7, alpha = 0.85) +
+  facet_grid(bias_type ~ fishery_type, switch = "y") +
+  scale_x_log10(breaks = c(0.5, 1, 1.5, 2)) +
+  scale_y_log10(breaks = c(0.5, 1, 2)) +
+  scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]),
+                     guide = "none") +
+  labs(
+    title = "Change b, and estimated catch moves as 1 / b",
+    subtitle = "One line per fitted fishery-year. Shaded band = that series' plausible range for b (T2 prediction interval).\nb below 1 pushes catch up; b above 1 pushes it down.",
+    x = "b (log scale)", y = "catch relative to the fitted estimate (log scale)",
+    caption = "No re-fitting: the relationship is exact where no census is collected. With census the effect is damped -- see T4."
+  ) +
+  theme_bss()
+
+save_fig(fig19, "fig19_direct_sensitivity", width = 11, height = 5.5)
+
 cli::cli_alert_success("Figures written to {.path {FIG_DIR}}.")
+
+cli::cli_h2("T7 -- what changing b does to catch, per fishery (most recent year)")
+T7 |>
+  filter(tier_kind != "anchor") |>
+  group_by(fishery_type, bias_type) |>
+  filter(year_start == max(year_start)) |>
+  ungroup() |>
+  filter(tier_kind == "empirical") |>
+  select(fishery_type, bias_type, tier, b_alt, pct_change_catch, catch_estimate) |>
+  arrange(fishery_type, bias_type, b_alt) |>
+  print(n = Inf)
 
 # ------------------------------------------------------------------------------
 # Console summary -- the numbers to walk into the meeting with
