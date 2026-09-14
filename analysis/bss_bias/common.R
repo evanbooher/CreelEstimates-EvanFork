@@ -30,6 +30,18 @@ SEQ_RAMP <- c("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", 
 # ramp -- parity is a categorical distinction, not a magnitude.
 PARITY_COLORS <- c("even" = CAT[["blue"]], "odd (pink)" = CAT[["magenta"]])
 
+# FIGURE CONVENTION: TITLE ONLY -- no subtitle, no caption.
+#
+# Per direction. These figures are walked through in meetings and pasted into
+# decks, where a subtitle competes with what is being said out loud and a
+# caption is too small to read from the room. Anything that was living in a
+# subtitle belongs in the surrounding text, the report section, or the script's
+# header comment -- all of which stay with the analysis, unlike a caption
+# cropped out of a screenshot.
+#
+# theme_bss() keeps plot.caption styled so an existing figure elsewhere in the
+# pipeline still renders correctly; do not add new ones.
+
 theme_bss <- function() {
   ggplot2::theme_minimal(base_size = 11) +
     ggplot2::theme(

@@ -615,10 +615,8 @@ fig17 <- ggplot(curve_df, aes(b_alt, catch_multiplier)) +
   scale_shape_manual(values = c("PI low" = 1, "predicted (pooled)" = 19, "PI high" = 2), name = NULL) +
   labs(
     title = "Estimated catch moves as 1 / b",
-    subtitle = "Elasticity -1: a 1% error in the imported b is a 1% error in catch, in the opposite direction.\nPoints mark each series' predicted b and its prediction-interval bounds (T2).",
     x = "Effort-index bias term b (log scale)",
-    y = "Catch multiplier relative to b = 1 (log scale)",
-    caption = "Exact where no census is collected, which is the scenario under discussion. With census, effort is pinned directly (Stan line 201) and the effect is damped -- see T4."
+    y = "Catch multiplier relative to b = 1 (log scale)"
   ) +
   theme_bss()
 
@@ -642,9 +640,7 @@ fig18 <- ggplot(fig18_df, aes(x = factor(year_start), y = ratio_median, color = 
   scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]), name = NULL) +
   labs(
     title = "What importing a predicted b would have cost, year by year",
-    subtitle = "Ratio of catch from an imported b to catch from that year's measured b, leave-one-out.\nAbove 1 = importing b overstates catch. Thick bar 80%, thin bar 95%.",
-    x = NULL, y = "catch (imported b) / catch (measured b), log scale",
-    caption = "Leave-one-out: each year is predicted from the OTHER years of its series, never from a mean containing itself. Upper bound on error -- assumes no census that year."
+    x = NULL, y = "catch (imported b) / catch (measured b), log scale"
   ) +
   theme_bss()
 
@@ -697,9 +693,7 @@ fig19 <- ggplot(exposure, aes(y = series, color = bias_type)) +
                      name = NULL) +
   labs(
     title = "How much could estimated catch move, if b is wrong?",
-    subtitle = "Each bar spans the catch outcomes implied by that series' own plausible range for b (T2 prediction interval).\nCatch goes as 1/b, so a LOW b pushes catch up and a HIGH b pushes it down.",
-    x = "Change in estimated catch (log scale)", y = NULL,
-    caption = "Census-free case, where the relationship is exact. Vehicle series are consistently tighter than trailer -- see the T6 calibration table for why that matters."
+    x = "Change in estimated catch (log scale)", y = NULL
   ) +
   theme_bss() +
   theme(panel.grid.major.y = element_blank())
