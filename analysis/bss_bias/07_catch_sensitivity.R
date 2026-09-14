@@ -164,7 +164,8 @@ if (length(catch_files) > 1) {
 if (is.null(catch_base)) {
   cli::cli_alert_info(
     "No {.file bss_catch_baseline.csv} -- results will be in percent only. \\
-     Run {.file 01b_fit_catch_groups.R} to add the in-fish translation."
+     Run {.file 09_read_production_estimates.R} to pull season totals from the \\
+     production pipeline's fishery_analyses/ output."
   )
 }
 
