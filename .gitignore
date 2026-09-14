@@ -62,6 +62,3 @@ config.yml
 # anything in the pipeline, and they clutter the commit pane on every run.
 /dwg_export.xlsx
 /interview_out.csv
-
-# Per-process job logs and PID files from 01b_launch_jobs.R.
-/analysis/bss_bias/outputs/logs/

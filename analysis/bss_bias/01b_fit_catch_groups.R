@@ -46,16 +46,14 @@
 # Usage -- from a shell, optionally several at once:
 #   Rscript analysis/bss_bias/01b_fit_catch_groups.R <group> [fishery-regex] [years]
 #
-#   Each invocation is one OS process. FIT_CONFIGS$quick uses 2 chains on 2
-#   cores, so on an 8-core machine run FOUR invocations concurrently and no
-#   more -- see the run block at the bottom of this file.
+#   FIT_CONFIGS$quick uses 2 chains on 2 cores. Fits run one after another, so
+#   allow roughly 20-30 minutes each.
 #
-#   CONCURRENCY: 01's append_csv_row() is a read-modify-write over the whole
-#   CSV, which is not safe for several processes at once. Each run therefore
-#   sets OUTPUT_TAG so it writes its own files (..._<group>_<fisheries>.csv);
-#   07_catch_sensitivity.R globs and merges them. Do not remove the tag to
-#   "tidy up" the output directory -- concurrent runs will corrupt each
-#   other's reads silently before they fail loudly.
+#   RUN IT SERIALLY. 01's append_csv_row() reads the whole CSV, drops the
+#   current fishery's row and rewrites the file. Two runs at once will have one
+#   truncating a file while the other reads it, and the reader fails with
+#   "object 'fishery_name' not found". If you ever do want them in parallel,
+#   set OUTPUT_TAG per process (see 01) so each writes its own files.
 #
 # Outputs (appended, one row per fishery-year x catch group):
 #   bss_catch_baseline.csv        -- C_sum / E_sum posterior summaries  <- 07 reads this
@@ -149,18 +147,6 @@ if (identical(years_mode, "latest")) {
 
 targets <- sort(unique(disc$fishery_name))
 
-# Announce this process's PID so 01b_launch_jobs.R's job_kill() can stop these
-# runs specifically, rather than taskkill-ing every Rscript on the machine.
-# Written here rather than captured by the launcher because system2(wait =
-# FALSE) returns no PID. Removed on clean completion; a stale file left by a
-# crash is harmless, job_kill() skips PIDs that are no longer running.
-JOB_PID_FILE <- file.path(
-  here::here("analysis", "bss_bias", "outputs", "logs"),
-  sprintf("01b_%s.pid", gsub("[^[:alnum:]]+", "_", paste(group_key, fishery_re, sep = "_")))
-)
-dir.create(dirname(JOB_PID_FILE), recursive = TRUE, showWarnings = FALSE)
-writeLines(as.character(Sys.getpid()), JOB_PID_FILE)
-
 cli::cli_h1("01b -- catch-group baseline fits")
 cli::cli_alert_info("Catch group{?s}: {.val {keys}}")
 # Two calls on purpose: a cli string may carry only ONE quantity when it also
@@ -182,44 +168,9 @@ FIT_CONFIG_NAME     <- "quick"
 for (k in keys) {
   cli::cli_h2("Catch group: {k}")
   RUN_CATCH_GROUP <- CATCH_GROUPS[[k]]
-  # Every CSV this process writes gets its own name. append_csv_row() in 01 is
-  # a read-modify-write and is not safe for concurrent processes -- without
-  # this, two jobs racing on bss_b_comparability_raw.csv leave one of them
-  # reading a truncated file and failing with "object 'fishery_name' not
-  # found". Merged back together by 07_catch_sensitivity.R, which globs.
-  # Per-process output files exist only to stop CONCURRENT runs corrupting each
-  # other's read-modify-write in append_csv_row(). A serial run from the Console
-  # has no such problem, so it writes the normal filenames and leaves the output
-  # directory tidy. 07 reads either shape.
-  OUTPUT_TAG <- if (interactive()) "" else gsub("[^[:alnum:]]+", "_", paste(k, fishery_re, sep = "_"))
   source(here::here("analysis", "bss_bias", "01_fit_bss_bias.R"), local = FALSE)
 }
-
-unlink(JOB_PID_FILE)
 
 cli::cli_alert_success(
   "Done. 07_catch_sensitivity.R will pick up {.file bss_catch_baseline.csv} automatically."
 )
-
-# ------------------------------------------------------------------------------
-# RUN BLOCK -- four concurrent processes on 8 cores (2 chains x 2 cores each).
-#
-#   PowerShell:
-#     Start-Process Rscript "analysis/bss_bias/01b_fit_catch_groups.R chinook_all  Snohomish      latest"
-#     Start-Process Rscript "analysis/bss_bias/01b_fit_catch_groups.R coho_harvest Snohomish      latest"
-#     Start-Process Rscript "analysis/bss_bias/01b_fit_catch_groups.R chinook_all  Stillaguamish  latest"
-#     Start-Process Rscript "analysis/bss_bias/01b_fit_catch_groups.R coho_harvest Stillaguamish  latest"
-#
-#   bash / macOS / Linux:
-#     Rscript analysis/bss_bias/01b_fit_catch_groups.R chinook_all  Snohomish     latest &
-#     Rscript analysis/bss_bias/01b_fit_catch_groups.R coho_harvest Snohomish     latest &
-#     Rscript analysis/bss_bias/01b_fit_catch_groups.R chinook_all  Stillaguamish latest &
-#     Rscript analysis/bss_bias/01b_fit_catch_groups.R coho_harvest Stillaguamish latest &
-#     wait
-#
-# Concurrent appends are handled by OUTPUT_TAG (see the header): each process
-# writes its own CSVs and 07 merges them. The per-fishery DWG cache is read-only
-# by the time these run -- if a fishery-year has never been fetched, run it once
-# on its own first so the two catch-group jobs for it do not race on writing the
-# same cache file.
-# ------------------------------------------------------------------------------

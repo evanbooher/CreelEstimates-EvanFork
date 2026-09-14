@@ -206,11 +206,9 @@ affects the creel estimates themselves and not just this work.
    `bss_catch_baseline.csv` + an invariance-check row -- never a duplicate `b`.
    Re-run `07` afterwards to pick up the in-fish translation.
 
-   Launch the fits in parallel from the **R Console** with
-   **`01b_launch_jobs.R`** -- no shell, no PATH problem (R resolves its own
-   `Rscript`), one log per job under `outputs/logs/`, and `job_status()` /
-   `job_tail()` left behind to watch them. Each fit uses 2 cores, so four
-   concurrent jobs suit an 8-core machine.
+   Run it serially from the **R Console** and watch it work:
+   `source("analysis/bss_bias/01b_fit_catch_groups.R")`. Narrow it first with
+   `GROUP_KEY` / `FISHERY_RE` / `YEARS_MODE` if wanted.
 
 ## Public-data path -- confirmed working, VPN not required
 
