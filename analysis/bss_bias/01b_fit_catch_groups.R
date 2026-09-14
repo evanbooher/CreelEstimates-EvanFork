@@ -131,6 +131,9 @@ targets <- sort(unique(disc$fishery_name))
 
 cli::cli_h1("01b -- catch-group baseline fits")
 cli::cli_alert_info("Catch group{?s}: {.val {keys}}")
+# Echoed for the same reason 00d echoes it: these settings persist in the R
+# session, so a stale value silently changes the scope of the run.
+cli::cli_alert_info("Fishery filter: {.val {fishery_re}} | years: {.val {years_mode}} | fit: {.val {FIT_CONFIG_NAME}}")
 # Two calls on purpose: a cli string may carry only ONE quantity when it also
 # carries a {?s} plural marker, and "{length(targets)} ... {targets}" gives it
 # two -- which aborts with "Multiple quantities for pluralization" rather than

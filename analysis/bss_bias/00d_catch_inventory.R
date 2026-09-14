@@ -58,6 +58,11 @@ targets <- read_csv(disc_path, show_col_types = FALSE) |>
   sort()
 
 cli::cli_h1("00d -- catch inventory")
+# Echo the effective filter. FISHERY_RE uses the exists() idiom so it can be
+# set before sourcing -- which also means a value left over from an earlier
+# 01b run silently narrows this scan. Printing it is the difference between
+# noticing that and quietly concluding a basin has no data.
+cli::cli_alert_info("Fishery filter: {.val {FISHERY_RE}}{if (FISHERY_RE == '.') ' (all)' else ' -- set FISHERY_RE or rm() it to widen'}")
 cli::cli_alert_info("Scanning {length(targets)} fishery-year{?s}.")
 
 # Read-only: report an uncached fishery-year rather than fetching it, so this
