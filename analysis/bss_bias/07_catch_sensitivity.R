@@ -345,9 +345,23 @@ loo_one <- function(series_df, i) {
   log_ratio <- log_meas - log_pred          # = log(catch_pred / catch_meas)
   ratio     <- exp(log_ratio)
 
-  # Did the held-out year's measured b land inside its own LOO 95% PI? [S5]
-  pi_lo <- mu_loo - 1.96 * sd_pred
-  pi_hi <- mu_loo + 1.96 * sd_pred
+  # Two different intervals, and conflating them biases the calibration check.
+  #
+  # sd_pred covers a new year's TRUE b: sqrt(tau^2 + SE^2). That is the right
+  # interval for the value you would IMPORT, and it is what pred_pi_* reports.
+  #
+  # The calibration check compares that prediction against a MEASURED b, which
+  # carries its own estimation error v_i on top of the true value. So the
+  # interval a held-out observation should fall inside is
+  # sqrt(tau^2 + SE^2 + v_i) -- wider. Checking against sd_pred alone asks the
+  # prediction to hit a noisy target exactly and reports too many misses; an
+  # earlier version of this did that and put coverage at 72% when the honest
+  # figure is higher.
+  sd_obs <- sqrt(f$tau2 + se_loo^2 + held$vi)
+  pi_lo  <- mu_loo - 1.96 * sd_pred     # prediction for this year's true b
+  pi_hi  <- mu_loo + 1.96 * sd_pred
+  obs_lo <- mu_loo - 1.96 * sd_obs      # where a measured b should land
+  obs_hi <- mu_loo + 1.96 * sd_obs
 
   tibble(
     basin = held$basin, fishery_type = held$fishery_type, bias_type = held$bias_type,
@@ -358,7 +372,12 @@ loo_one <- function(series_df, i) {
     pred_pi_lb   = exp(pi_lo),
     pred_pi_ub   = exp(pi_hi),
     tau_loo      = sqrt(f$tau2),
-    inside_95_pi = held$log_b >= pi_lo && held$log_b <= pi_hi,
+    obs_pi_lb    = exp(obs_lo),
+    obs_pi_ub    = exp(obs_hi),
+    inside_95_pi = held$log_b >= obs_lo && held$log_b <= obs_hi,
+    # The stricter question, kept alongside: would the measured value have
+    # fallen inside the interval we would actually QUOTE for this year's b?
+    inside_95_pred = held$log_b >= pi_lo && held$log_b <= pi_hi,
     ratio_point  = held$median / exp(mu_loo),
     ratio_median = median(ratio),
     ratio_q10    = unname(quantile(ratio, 0.10)),
@@ -421,12 +440,13 @@ cli::cli_alert_success("T6 backtest written ({nrow(T6)} held-out fishery-years).
 
 T6_cal <- T6 |>
   distinct(basin, fishery_type, bias_type, fishery_name, year_start, inside_95_pi,
-           abs_pct_err_med, pct_err_point) |>
+           inside_95_pred, abs_pct_err_med, pct_err_point) |>
   group_by(basin, fishery_type, bias_type) |>
   summarise(
-    n_years_tested   = n(),
-    n_inside_95_pi   = sum(inside_95_pi),
-    pct_inside_95_pi = 100 * mean(inside_95_pi),
+    n_years_tested     = n(),
+    n_inside_95_pi     = sum(inside_95_pi),
+    pct_inside_95_pi   = 100 * mean(inside_95_pi),
+    pct_inside_95_pred = 100 * mean(inside_95_pred),
     median_abs_pct_err = median(abs(pct_err_point)),
     worst_pct_err      = pct_err_point[which.max(abs(pct_err_point))],
     .groups = "drop"
@@ -435,10 +455,17 @@ T6_cal <- T6 |>
 
 write_csv(T6_cal, file.path(OUT_DIR, "bss_b_T6_calibration.csv"))
 
-overall_cov <- 100 * mean(distinct(T6, fishery_name, bias_type, inside_95_pi)$inside_95_pi)
+cov_df <- distinct(T6, fishery_name, bias_type, inside_95_pi, inside_95_pred)
+overall_cov  <- 100 * mean(cov_df$inside_95_pi)
+overall_pred <- 100 * mean(cov_df$inside_95_pred)
 cli::cli_alert_info(
-  "Calibration [S5]: {round(overall_cov)}% of held-out fishery-years fell inside \\
-   their own leave-one-out 95% prediction interval (nominal 95%)."
+  "Calibration [S5]: {round(overall_cov)}% of held-out years fell inside their \\
+   leave-one-out 95% interval for a MEASURED b (nominal 95%, n = {nrow(cov_df)})."
+)
+cli::cli_alert_info(
+  "Stricter: {round(overall_pred)}% fell inside the narrower interval we would \\
+   QUOTE for this year's true b. The gap between the two is the measurement \\
+   error in the yardstick, not a failure of the prediction."
 )
 
 # ------------------------------------------------------------------------------
