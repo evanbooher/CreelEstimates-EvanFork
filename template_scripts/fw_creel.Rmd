@@ -25,7 +25,7 @@ params:
   export: "local"
   export_tables: "both"
   enable_cache: FALSE  # Set to FALSE to disable all caching (useful when cached files become too large)
-  fit_only: FALSE  # TRUE skips every plot/table chunk -- fetch, prep, sample, save, nothing else
+  fit_only: FALSE  # TRUE skips every plot/table/export chunk -- fetch, prep, sample, save estimates_bss.rds, nothing else
   save_draws: FALSE  # TRUE keeps posterior draws in estimates_bss.rds (needed by any downstream analysis that reads C_sum/E_sum/b)
 output:
   html_document:
@@ -1549,7 +1549,7 @@ save_gt_table(interview_coverage_table, paste0("interview_coverage_table"))
 
 # Save results
 
-```{r transform_estimates, eval = TRUE, results='hide', cache=params$enable_cache, dependson="estimates_bss", cache.extra=param_hash}
+```{r transform_estimates, eval=!params$fit_only, results='hide', cache=params$enable_cache, dependson="estimates_bss", cache.extra=param_hash}
 #Extract and transform model estimates into a common format
 transformed_pe_data <- list()
 transformed_bss_data <- list()
@@ -1601,7 +1601,7 @@ if (params$export %in% c("database", "local") && !params$model_used %in% c("PE o
 # cli_alert_success("Transformed estimates saved to {.path {file.path(outputs_folders$outputs, 'creel_estimates_transformed.rds')}}")
 ```
 
-```{r export_estimates, results='hide', eval= TRUE}
+```{r export_estimates, results='hide', eval=!params$fit_only}
 
 if (params$export == "database") {
   #Converts metadata to JSON and adds to analysis_lut
