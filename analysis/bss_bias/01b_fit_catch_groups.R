@@ -46,7 +46,8 @@
 #     GROUP_KEY   <- "chinook_all"         # chinook_all | coho_harvest | all
 #     FISHERY_RE  <- "Snohomish"           # regex over fishery_name
 #     YEARS_MODE  <- "latest"              # latest | all
-#     FIT_CONFIG  <- "smoke"               # lite (default) | smoke | quick | prod
+#     FIT_CONFIG  <- "prod"                # quick (default) | prod. NOT lite/smoke:
+#                                          # C_sum from an unconverged chain is nonsense.
 #
 # Usage -- from a shell, optionally several at once:
 #   Rscript analysis/bss_bias/01b_fit_catch_groups.R <group> [fishery-regex] [years]
@@ -86,7 +87,11 @@ if (!exists("YEARS_MODE", inherits = FALSE)) YEARS_MODE <- if (length(args) >= 3
 # Resolved HERE with the other settings, not down in the run section. It used
 # to be assigned just before the loop, which left the scope echo below
 # referencing an object that did not exist yet.
-if (!exists("FIT_CONFIG",  inherits = FALSE)) FIT_CONFIG <- "lite"
+# "quick", not "lite". See FIT_CONFIGS in 01: lite produced a season Chinook
+# total of 40,426 for Skagit fall salmon 2021 against 25 interviewed fish,
+# because 100 warmup iterations does not converge this model and C_sum is a
+# generated quantity over all of it.
+if (!exists("FIT_CONFIG",  inherits = FALSE)) FIT_CONFIG <- "quick"
 
 group_key       <- GROUP_KEY
 fishery_re      <- FISHERY_RE

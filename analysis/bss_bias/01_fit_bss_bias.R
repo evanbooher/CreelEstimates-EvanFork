@@ -192,14 +192,18 @@ check_fit_config <- function() {
 FIT_CONFIGS <- list(
   smoke = list(n_chain = 1, n_cores = 1, n_iter = 60,   n_warmup = 30,   n_thin = 1, adapt_delta = 0.70, max_treedepth = 10),
   quick = list(n_chain = 2, n_cores = 2, n_iter = 600,  n_warmup = 300,  n_thin = 1, adapt_delta = 0.80, max_treedepth = 11),
-  # For CATCH_BASELINE_ONLY runs, where the deliverable is a season-total
-  # SCALAR and not `b`. Light is defensible there for a specific reason: `b` is
-  # invariant to the catch group, so these fits contribute nothing to the b
-  # series -- the precision of the sensitivity result still comes from the
-  # full-quality b draws already in outputs/b_draws/. Only C_sum's central
-  # value is wanted, and 200 draws across 2 chains estimates a median
-  # adequately while still yielding a usable rhat (1 chain would not).
-  # Do NOT use this config for a b-producing run.
+  # WAS the default for CATCH_BASELINE_ONLY runs, on the reasoning that only
+  # C_sum's central value was wanted so 200 draws would do. That reasoning was
+  # WRONG and produced nonsense: Skagit fall salmon 2021 returned a season
+  # Chinook total of 40,426 against 25 encounters in interviews. 100 warmup
+  # iterations does not adapt a model this size, and an unconverged chain's
+  # median is not an estimate of anything.
+  #
+  # The error was treating "I only need one number" as "the fit can be rough".
+  # C_sum is a generated quantity over the ENTIRE effort and catch model --
+  # lambda_E * L * lambda_C summed across every day and section -- so it needs
+  # convergence at least as much as `b` does, not less. Kept only for smoke
+  # testing; never for a number anyone will read.
   lite  = list(n_chain = 2, n_cores = 2, n_iter = 200,  n_warmup = 100,  n_thin = 1, adapt_delta = 0.80, max_treedepth = 10),
   prod  = list(n_chain = 4, n_cores = 4, n_iter = 2000, n_warmup = 1000, n_thin = 1, adapt_delta = 0.95, max_treedepth = 13)
 )
@@ -424,8 +428,15 @@ tagged_path <- function(path) {
   sub("\\.csv$", paste0("__", OUTPUT_TAG, ".csv"), path)
 }
 
-append_csv_row <- function(row_df, path) {
+# key_cols: which columns identify a row. Defaults to fishery_name alone, which
+# is right for every per-fishery-year output -- and WRONG for anything written
+# once per catch group. bss_catch_baseline.csv holds one row per
+# (fishery_name, est_cg); keyed on fishery_name only, the Coho pass silently
+# DELETED every Chinook row as it went, so the file could never hold both
+# groups at once.
+append_csv_row <- function(row_df, path, key_cols = "fishery_name") {
   path <- tagged_path(path)
+  key_cols <- intersect(key_cols, names(row_df))
   if (file.exists(path)) {
     # Force the re-read to use row_df's ACTUAL column types rather than
     # read_csv()'s own guess from the file's text. Columns built via
@@ -440,8 +451,10 @@ append_csv_row <- function(row_df, path) {
       else if (is.character(.x)) readr::col_character()
       else if (is.logical(.x)) readr::col_logical()
       else readr::col_double()))
-    existing <- readr::read_csv(path, col_types = col_types) |>
-      dplyr::filter(!(fishery_name %in% row_df$fishery_name))
+    existing <- readr::read_csv(path, col_types = col_types)
+    if (all(key_cols %in% names(existing))) {
+      existing <- dplyr::anti_join(existing, dplyr::distinct(row_df[key_cols]), by = key_cols)
+    }
     readr::write_csv(dplyr::bind_rows(existing, row_df), path)
   } else {
     readr::write_csv(row_df, path)
@@ -773,9 +786,19 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
 
   chosen_ecg <- paste0(c(target_group$species, target_group$life_stage, target_group$fin_mark, target_group$fate),
                         collapse = "_")
-  if (!chosen_ecg %in% interview_plus_catch$est_cg) {
-    skip_fishery(paste0("Target catch group ('", chosen_ecg, "') has no matching records for '",
-                         fishery_name, "' -- check species/fin_mark/fate assumptions for this fishery."),
+  # This guard USED to test `chosen_ecg %in% interview_plus_catch$est_cg`, which
+  # can never be FALSE: prep_dwg_interview_catch() replicates EVERY interview
+  # for each catch group and left-joins the counts with fish_count = 0 where
+  # nothing matched. So est_cg is present for every interview whether or not a
+  # single fish of that group was caught, and the guard passed on fisheries
+  # with zero records -- exactly the ones 00d_catch_inventory.R flags as "do
+  # not fit". Test the fish, not the label.
+  n_fish_ecg <- sum(interview_plus_catch$fish_count[interview_plus_catch$est_cg == chosen_ecg],
+                    na.rm = TRUE)
+  if (!chosen_ecg %in% interview_plus_catch$est_cg || n_fish_ecg <= 0) {
+    skip_fishery(paste0("Target catch group ('", chosen_ecg, "') has no fish recorded for '",
+                         fishery_name, "' -- zero is a RESULT, carried through by 07 from the ",
+                         "00d inventory. Nothing to fit."),
                  stage = "choose_ecg")
   }
 
@@ -1060,19 +1083,25 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
           sd     = ~stats::sd(.x, na.rm = TRUE),
           median = ~stats::median(.x, na.rm = TRUE),
           q2.5   = ~stats::quantile(.x, probs = 0.025, na.rm = TRUE),
-          q97.5  = ~stats::quantile(.x, probs = 0.975, na.rm = TRUE)
+          q97.5  = ~stats::quantile(.x, probs = 0.975, na.rm = TRUE),
+          # Without these there is no way to tell a season total from a number
+          # an unconverged chain wandered to. C_sum is a generated quantity
+          # over the whole effort AND catch model, so it needs the fit to have
+          # actually converged -- more than `b` does, not less.
+          rhat = posterior::rhat, ess_bulk = posterior::ess_bulk
         ) |>
           dplyr::rename(q2.5 = `2.5%`, q97.5 = `97.5%`) |>
           dplyr::mutate(n_finite_frac = unname(finite_frac[variable])) |>
           tidyr::pivot_wider(
             names_from = variable,
-            values_from = c(mean, sd, median, q2.5, q97.5, n_finite_frac),
+            values_from = c(mean, sd, median, q2.5, q97.5, n_finite_frac, rhat, ess_bulk),
             names_glue = "{variable}_{.value}"
           ) |>
           dplyr::mutate(fishery_name = .env$fishery_name, est_cg = .env$chosen_ecg,
                         fit_config = fit_config_name, n_div = n_div, runtime_sec = runtime_sec) |>
           dplyr::relocate(fishery_name, est_cg)
-        append_csv_row(totals_row, file.path(OUT_DIR, "bss_catch_baseline.csv"))
+        append_csv_row(totals_row, file.path(OUT_DIR, "bss_catch_baseline.csv"),
+                       key_cols = c("fishery_name", "est_cg"))
         if (any(finite_frac < 1)) {
           cli::cli_alert_warning(
             "  Catch baseline written, but only {round(100 * min(finite_frac))}% of draws were finite -- treat it as provisional."
@@ -1091,7 +1120,8 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
     b_check <- bias_summary |>
       dplyr::select(fishery_name, bias_type, median, sd, rhat, prior_contraction) |>
       dplyr::mutate(est_cg = chosen_ecg)
-    append_csv_row(b_check, file.path(OUT_DIR, "bss_b_invariance_check.csv"))
+    append_csv_row(b_check, file.path(OUT_DIR, "bss_b_invariance_check.csv"),
+                   key_cols = c("fishery_name", "est_cg"))
     cli::cli_alert_info("  CATCH_BASELINE_ONLY: b summary/draws not written (invariance check row only).")
     return(list(status = "ok", bias_summary = bias_summary, runtime_sec = runtime_sec))
   }
