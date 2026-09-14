@@ -142,7 +142,13 @@ cli::cli_h1("01b -- catch-group baseline fits")
 cli::cli_alert_info("Catch group{?s}: {.val {keys}}")
 # Echoed for the same reason 00d echoes it: these settings persist in the R
 # session, so a stale value silently changes the scope of the run.
-cli::cli_alert_info("Fishery filter: {.val {fishery_re}} | years: {.val {years_mode}} | fit: {.val {FIT_CONFIG_NAME}}")
+#
+# Built from a local resolved immediately above rather than referencing a
+# global assigned elsewhere in the file. A diagnostic line must never be the
+# thing that stops the run -- an earlier version referenced FIT_CONFIG_NAME
+# before it was assigned and killed the script before it fitted anything.
+fit_cfg <- if (exists("FIT_CONFIG_NAME", inherits = FALSE)) FIT_CONFIG_NAME else "(unset)"
+cli::cli_alert_info("Fishery filter: {.val {fishery_re}} | years: {.val {years_mode}} | fit: {.val {fit_cfg}}")
 # Two calls on purpose: a cli string may carry only ONE quantity when it also
 # carries a {?s} plural marker, and "{length(targets)} ... {targets}" gives it
 # two -- which aborts with "Multiple quantities for pluralization" rather than
