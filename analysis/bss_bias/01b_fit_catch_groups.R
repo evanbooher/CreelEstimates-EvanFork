@@ -30,12 +30,21 @@
 #   holds each run's `b`, to be compared against the stored value. A material
 #   difference falsifies the reasoning above and should stop the analysis.
 #
-# Usage:
-#   Rscript analysis/bss_bias/01b_fit_catch_groups.R <group> [fishery-regex] [years]
+# Usage -- SERIAL, from the RStudio Console (the simple path, live output):
 #
-#     <group>          chinook_all | coho_harvest | all
-#     [fishery-regex]  default "Snohomish|Stillaguamish"
-#     [years]          "latest" (default, most recent year per fishery) | "all"
+#   source("analysis/bss_bias/01b_fit_catch_groups.R")
+#
+#   That runs both catch groups against Snohomish + Stillaguamish, most recent
+#   year each, one fit at a time with everything printing to the Console. To
+#   narrow it, set any of these first (they persist between sources -- reset
+#   them or restart R to change a run):
+#
+#     GROUP_KEY  <- "chinook_all"          # chinook_all | coho_harvest | all
+#     FISHERY_RE <- "Snohomish"            # regex over fishery_name
+#     YEARS_MODE <- "latest"               # latest | all
+#
+# Usage -- from a shell, optionally several at once:
+#   Rscript analysis/bss_bias/01b_fit_catch_groups.R <group> [fishery-regex] [years]
 #
 #   Each invocation is one OS process. FIT_CONFIGS$quick uses 2 chains on 2
 #   cores, so on an 8-core machine run FOUR invocations concurrently and no
@@ -57,10 +66,24 @@
 library(cli)
 library(here)
 
+# Settings come from, in order of precedence: variables already in the global
+# environment, then command-line arguments, then the defaults. The first branch
+# is what makes this sourceable straight from the RStudio Console --
+#
+#   source("analysis/bss_bias/01b_fit_catch_groups.R")           # everything, serial
+#   GROUP_KEY <- "coho_harvest"; FISHERY_RE <- "Snohomish"
+#   source("analysis/bss_bias/01b_fit_catch_groups.R")           # one combination
+#
+# NOTE: those variables PERSIST between sources. Reset them (or restart R)
+# before a run you want to use different settings.
 args <- commandArgs(trailingOnly = TRUE)
-group_key    <- if (length(args) >= 1) args[[1]] else "all"
-fishery_re   <- if (length(args) >= 2) args[[2]] else "Snohomish|Stillaguamish"
-years_mode   <- if (length(args) >= 3) args[[3]] else "latest"
+if (!exists("GROUP_KEY",  inherits = FALSE)) GROUP_KEY  <- if (length(args) >= 1) args[[1]] else "all"
+if (!exists("FISHERY_RE", inherits = FALSE)) FISHERY_RE <- if (length(args) >= 2) args[[2]] else "Snohomish|Stillaguamish"
+if (!exists("YEARS_MODE", inherits = FALSE)) YEARS_MODE <- if (length(args) >= 3) args[[3]] else "latest"
+
+group_key  <- GROUP_KEY
+fishery_re <- FISHERY_RE
+years_mode <- YEARS_MODE
 
 # ------------------------------------------------------------------------------
 # The catch groups. Each field is a str_detect PATTERN, so alternation works and
@@ -164,7 +187,11 @@ for (k in keys) {
   # this, two jobs racing on bss_b_comparability_raw.csv leave one of them
   # reading a truncated file and failing with "object 'fishery_name' not
   # found". Merged back together by 07_catch_sensitivity.R, which globs.
-  OUTPUT_TAG <- gsub("[^[:alnum:]]+", "_", paste(k, fishery_re, sep = "_"))
+  # Per-process output files exist only to stop CONCURRENT runs corrupting each
+  # other's read-modify-write in append_csv_row(). A serial run from the Console
+  # has no such problem, so it writes the normal filenames and leaves the output
+  # directory tidy. 07 reads either shape.
+  OUTPUT_TAG <- if (interactive()) "" else gsub("[^[:alnum:]]+", "_", paste(k, fishery_re, sep = "_"))
   source(here::here("analysis", "bss_bias", "01_fit_bss_bias.R"), local = FALSE)
 }
 
