@@ -14,7 +14,14 @@
 #     line 187  V_I[i] ~ poisson((lambda_E_S_I[...] * p_TI * R_V[1] + ...) * b[1])
 #               `b` multiplies the Poisson mean for the index counts. With the
 #               counts V_I fixed as data, lambda_E is proportional to 1/b.
-#               R_V cannot absorb it -- interviews pin R_V separately (line 210).
+#               O, L and p_TI are DATA and cannot absorb it; R_V is a parameter
+#               but is pinned separately by interviews (line 210).
+#
+#     line 140  lambda_E_S_I[s,i][d,g] = lambda_E_S[s][d,g] * eps_E_H[s,i][d,g]
+#               The load-bearing line. The index likelihood constrains
+#               lambda_E_S_I while catch uses lambda_E_S -- but the former is
+#               DERIVED from the latter, so `b` does reach catch. Had they been
+#               parameterised independently, `b` would not touch catch at all.
 #
 #     line 240  lambda_Ctot_S[s][d,g] = lambda_E_S[s][d,g] * L[d] * lambda_C_S[s][d,g]
 #               Catch = effort x trip length x CPUE.
@@ -32,6 +39,24 @@
 #   total and -1 is exact. See T4 below, which reports per fishery-year which
 #   index channels were live and whether census was present, rather than
 #   asserting -1 everywhere.
+#
+#   TWO QUALIFICATIONS, both checked against the model rather than assumed:
+#
+#   (a) EFFORT SCALES TOO, SO CPUE DOES NOT MOVE. Line 243 gives
+#       E[s][d,g] = lambda_E_S[s][d,g] * L[d], so E_sum goes as 1/b exactly as
+#       C_sum does. C_sum / E_sum is therefore INVARIANT to `b`. Changing `b`
+#       rescales the fishery; it does not change the catch rate. That is worth
+#       saying out loud, and it is testable.
+#
+#   (b) THIS IS THE NO-REFIT COUNTERFACTUAL, and it is a slight upper bound.
+#       eps_E_H (line 140) is a free gamma(r_E, r_E) parameter and the index
+#       likelihood constrains only the PRODUCT lambda_E_S * eps_E_H. Moving
+#       eps_E_H rather than lambda_E_S costs prior density, so most of the
+#       rescaling lands on lambda_E_S -- but the identification is soft, not
+#       hard. Holding everything at what the fit produced and swapping `b`, as
+#       T7 does, gives exactly 1/b; actually REFITTING with `b` pinned would
+#       move catch slightly less, by however much eps_E_H takes up at the
+#       fitted r_E.
 #
 #   A COROLLARY WORTH STATING IN THE ROOM: the PERCENTAGE effect is identical
 #   for every catch group. Chinook encounters and Coho harvest move by exactly
