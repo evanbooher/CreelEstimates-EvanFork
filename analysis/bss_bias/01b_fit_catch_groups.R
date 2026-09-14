@@ -34,10 +34,16 @@
 #
 #   source("analysis/bss_bias/01b_fit_catch_groups.R")
 #
-#   With nothing set, that runs BOTH catch groups against Snohomish,
-#   Stillaguamish and Skagit fall salmon, ALL years -- about 25 fits, serial,
-#   everything printing to the Console. Fishery-years with no records for a
-#   group are skipped by 01 and carried through as zero by 07.
+#   With nothing set, that runs CHINOOK ENCOUNTERS against Snohomish and
+#   Stillaguamish, ALL years -- 6 fits (three of the nine fishery-years have
+#   zero Chinook records and are skipped; 07 carries those through as zero).
+#
+#   Chinook is the impact-limited group: its UPPER BOUND is what decides
+#   whether a fishery opens, so an estimate built on a handful of encounters is
+#   still decision-relevant. Report those with intervals, never as a point.
+#
+#   For the wider sweep (both groups, plus Skagit fall salmon -- about 25 fits):
+#     GROUP_KEY <- "all"; FISHERY_RE <- "Snohomish|Stillaguamish|Skagit fall salmon"
 #
 #   To narrow it, set any of these first. They PERSIST between sources, so
 #   rm() them or restart R to change a run -- a stale value silently rescopes
@@ -81,8 +87,14 @@ library(here)
 # NOTE: those variables PERSIST between sources. Reset them (or restart R)
 # before a run you want to use different settings.
 args <- commandArgs(trailingOnly = TRUE)
-if (!exists("GROUP_KEY",  inherits = FALSE)) GROUP_KEY  <- if (length(args) >= 1) args[[1]] else "all"
-if (!exists("FISHERY_RE", inherits = FALSE)) FISHERY_RE <- if (length(args) >= 2) args[[2]] else "Snohomish|Stillaguamish|Skagit fall salmon"
+# Narrowed to the decision at hand: Chinook encounters in the two basins with
+# live co-manager discussions. Chinook because it is the impact-limited
+# quantity -- the one whose upper bound decides whether a fishery opens -- and
+# these two basins because they are the ones being negotiated. Skagit fall
+# salmon and the coho groups are a wider sweep to run once this lands; widen
+# FISHERY_RE / GROUP_KEY when there is time for the other ~19 fits.
+if (!exists("GROUP_KEY",  inherits = FALSE)) GROUP_KEY  <- if (length(args) >= 1) args[[1]] else "chinook_all"
+if (!exists("FISHERY_RE", inherits = FALSE)) FISHERY_RE <- if (length(args) >= 2) args[[2]] else "Snohomish|Stillaguamish"
 if (!exists("YEARS_MODE", inherits = FALSE)) YEARS_MODE <- if (length(args) >= 3) args[[3]] else "all"
 # Resolved HERE with the other settings, not down in the run section. It used
 # to be assigned just before the loop, which left the scope echo below
