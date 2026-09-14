@@ -173,6 +173,39 @@ affects the creel estimates themselves and not just this work.
    fishery-series. Re-run `03_plot_b_series.R` after this to get Figure 6
    (options overlaid on the series).
 
+6. **`06_variability_analysis.R`** -- how variable `b` is across years, and
+   what that implies for predicting it in a year with no census. Produces T1
+   (inventory), T2 (per-series tau^2, I^2, Q, prediction interval) and T3 (pink
+   parity). Every column of T2 is documented in
+   [`T2_DATA_DICTIONARY.md`](T2_DATA_DICTIONARY.md).
+
+7. **`07_catch_sensitivity.R`** -- what an error in `b` costs in **estimated
+   catch**. No DB, no VPN, no Stan; reads the CSVs plus `outputs/b_draws/`.
+
+   The relationship is fixed by the model, not simulated: CPUE is fit from
+   interviews alone (Stan line 205, no `b`), `b` multiplies the index-count
+   Poisson mean (line 187), and catch is effort x trip length x CPUE (line 240).
+   So **catch is proportional to 1/b -- elasticity -1**, exactly, in a year with
+   no census. `b > 1` revises catch down; `b < 1` revises it up. Census (line
+   201) carries no `b` and is the only thing that breaks the confound.
+
+   The headline output is **T6, a leave-one-out backtest**: for every
+   fishery-year with a measured `b`, what catch would have been had the series
+   prediction been imported instead. Leave-one-out because T2's `pooled_b`
+   contains the year being tested. T6's calibration file is the empirical check
+   on exchangeability -- the assumption the comparability work puts in doubt.
+
+   Runs complete without step 8; results are then in percent rather than fish.
+
+8. **`01b_fit_catch_groups.R`** *(optional, MCMC)* -- re-fits the BSS against a
+   named catch group purely to retain `C_sum`, which `SAVE_FITS <- FALSE`
+   otherwise discards. `b` is **invariant to the catch group** (the effort and
+   catch sub-models share no parameters, and `prep_dwg_interview_catch()` keeps
+   every interview at `fish_count = 0` rather than subsetting), so these runs
+   set `CATCH_BASELINE_ONLY = TRUE` and write only
+   `bss_catch_baseline.csv` + an invariance-check row -- never a duplicate `b`.
+   Re-run `07` afterwards to pick up the in-fish translation.
+
 ## Public-data path -- confirmed working, VPN not required
 
 **Checked locally (VPN off):** `creelutils::fetch_data(fishery_name = "Skagit

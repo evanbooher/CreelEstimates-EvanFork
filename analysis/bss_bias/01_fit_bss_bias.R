@@ -178,14 +178,14 @@ FIT_CONFIGS <- list(
   quick = list(n_chain = 2, n_cores = 2, n_iter = 600,  n_warmup = 300,  n_thin = 1, adapt_delta = 0.80, max_treedepth = 11),
   prod  = list(n_chain = 4, n_cores = 4, n_iter = 2000, n_warmup = 1000, n_thin = 1, adapt_delta = 0.95, max_treedepth = 13)
 )
-FIT_CONFIG_NAME <- "quick"   # <-- default is the fast/throwaway config; change to "quick" once smoke passes, "prod" for backfill later
+if (!exists("FIT_CONFIG_NAME", inherits = FALSE)) FIT_CONFIG_NAME <- "quick"   # <-- default is the fast/throwaway config; change to "quick" once smoke passes, "prod" for backfill later
 
 # Restrict the run to specific fishery-year(s) without touching the discovery
 # CSV -- for proving one fishery end to end before committing to the full
 # queue, or re-running a single failure. NULL runs everything with
 # include_in_run == TRUE. Entries not in that set are reported and ignored.
 #   e.g. ONLY_FISHERIES <- c("Skagit fall salmon 2024")
-ONLY_FISHERIES <- NULL
+if (!exists("ONLY_FISHERIES", inherits = FALSE)) ONLY_FISHERIES <- NULL
 
 # Narrow a whole run to particular water and tag its outputs, so a fork-scoped
 # fit sits alongside the whole-fishery one instead of overwriting it. NULL (the
@@ -193,6 +193,23 @@ ONLY_FISHERIES <- NULL
 # below; see that file for the shape and for why a fork scope needs its
 # prior_contraction checked.
 RUN_SCOPE <- NULL
+
+# Override the target catch group for a whole run. NULL keeps the per-fishery
+# rules in fishery_target_catch_group(). Set to a one-row data.frame / list with
+# species / life_stage / fin_mark / fate (each a str_detect pattern, so "Adult|Jack"
+# works) to fit every fishery-year in the run against that group instead.
+#
+# Defined with the "only if the caller has not" idiom -- 01b_fit_catch_groups.R
+# sets these and then sources this file, so a bare assignment here would clobber
+# them. Same reasoning as RUN_SCOPE in scope_rules.R.
+if (!exists("RUN_CATCH_GROUP", inherits = FALSE)) RUN_CATCH_GROUP <- NULL
+
+# TRUE = this run exists only to produce season totals for a second catch group.
+# `b` is invariant to the catch group (effort and catch sub-models share no
+# parameters; every interview is retained at fish_count = 0 rather than
+# subsetted), so such a run must NOT append to bss_b_summary.csv or overwrite
+# b_draws -- it would duplicate every series and double the year counts in 06.
+if (!exists("CATCH_BASELINE_ONLY", inherits = FALSE)) CATCH_BASELINE_ONLY <- FALSE
 
 SAVE_FITS <- FALSE   # TRUE keeps the full stanfit per fishery-year (large!); the small
                       # b-summary + draws are the actual deliverable and are always saved.
@@ -399,6 +416,16 @@ append_csv_row <- function(row_df, path) {
 # ------------------------------------------------------------------------------
 
 fishery_target_catch_group <- function(fishery_name) {
+  # A run-level override wins over every name rule below.
+  if (!is.null(RUN_CATCH_GROUP)) {
+    g <- as.list(RUN_CATCH_GROUP)
+    need <- c("species", "life_stage", "fin_mark", "fate")
+    miss <- setdiff(need, names(g))
+    if (length(miss) > 0) {
+      cli::cli_abort("RUN_CATCH_GROUP is missing field{?s} {.val {miss}}.")
+    }
+    return(g[need])
+  }
   if (str_detect(fishery_name, regex("Chinook", ignore_case = TRUE))) {
     return(list(species = "Chinook", life_stage = "Adult", fin_mark = "AD", fate = "Kept"))
   }
@@ -937,6 +964,55 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
         TRUE                          ~ "informed"
       )
     )
+  # --- Season totals: the catch baseline -------------------------------------
+  # C_sum / E_sum are already in MONITOR_PARS, so every fit computes them --
+  # they were simply never retained once SAVE_FITS went to FALSE. Summarising
+  # them here costs nothing and is what lets 07_catch_sensitivity.R express its
+  # results in fish rather than percent.
+  #
+  # Keyed on the UNTAGGED fishery name plus est_cg: `b` is invariant to the
+  # catch group (the effort and catch sub-models share no parameters, and
+  # prep_dwg_interview_catch() retains every interview at fish_count = 0 rather
+  # than subsetting), so a re-fit under a second catch group must not write a
+  # second `b` row. See CATCH_BASELINE_ONLY below.
+  totals_draws <- try(
+    posterior::as_draws_df(bss_fit) |> posterior::subset_draws(variable = c("C_sum", "E_sum")),
+    silent = TRUE
+  )
+  if (!inherits(totals_draws, "try-error") && ncol(totals_draws) > 3) {
+    totals_row <- posterior::summarise_draws(
+      totals_draws,
+      mean, sd, median = ~stats::median(.x),
+      q2.5  = ~stats::quantile(.x, probs = 0.025),
+      q97.5 = ~stats::quantile(.x, probs = 0.975)
+    ) |>
+      dplyr::rename(q2.5 = `2.5%`, q97.5 = `97.5%`) |>
+      tidyr::pivot_wider(
+        names_from = variable,
+        values_from = c(mean, sd, median, q2.5, q97.5),
+        names_glue = "{variable}_{.value}"
+      ) |>
+      dplyr::mutate(fishery_name = .env$fishery_name, est_cg = .env$chosen_ecg,
+                    fit_config = fit_config_name, n_div = n_div, runtime_sec = runtime_sec) |>
+      dplyr::relocate(fishery_name, est_cg)
+    append_csv_row(totals_row, file.path(OUT_DIR, "bss_catch_baseline.csv"))
+    cli::cli_alert_success("  Catch baseline written for est_cg '{chosen_ecg}'.")
+  } else {
+    cli::cli_alert_warning("  No C_sum/E_sum draws in this fit -- catch baseline not written.")
+  }
+
+  # A catch-group re-fit exists to produce the baseline above and nothing else.
+  # Writing its `b` into bss_b_summary.csv would duplicate every series and
+  # silently double the year counts in 06's T2.
+  if (CATCH_BASELINE_ONLY) {
+    b_check <- bias_summary |>
+      dplyr::select(fishery_name, bias_type, median, sd, rhat, prior_contraction) |>
+      dplyr::mutate(est_cg = chosen_ecg)
+    append_csv_row(b_check, file.path(OUT_DIR, "bss_b_invariance_check.csv"))
+    cli::cli_alert_info("  CATCH_BASELINE_ONLY: b summary/draws not written (invariance check row only).")
+    return(list(status = "ok", bias_summary = bias_summary, runtime_sec = runtime_sec))
+  }
+
   append_csv_row(bias_summary, file.path(OUT_DIR, "bss_b_summary.csv"))
 
   draws <- posterior::as_draws_df(bss_fit) |> posterior::subset_draws(variable = "b")
