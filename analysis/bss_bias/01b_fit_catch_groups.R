@@ -34,15 +34,19 @@
 #
 #   source("analysis/bss_bias/01b_fit_catch_groups.R")
 #
-#   That runs both catch groups against Snohomish + Stillaguamish, most recent
-#   year each, one fit at a time with everything printing to the Console. To
-#   narrow it, set any of these first (they persist between sources -- reset
-#   them or restart R to change a run):
+#   With nothing set, that runs BOTH catch groups against Snohomish,
+#   Stillaguamish and Skagit fall salmon, ALL years -- about 25 fits, serial,
+#   everything printing to the Console. Fishery-years with no records for a
+#   group are skipped by 01 and carried through as zero by 07.
+#
+#   To narrow it, set any of these first. They PERSIST between sources, so
+#   rm() them or restart R to change a run -- a stale value silently rescopes
+#   the next one, which is why the effective settings are echoed at startup:
 #
 #     GROUP_KEY   <- "chinook_all"         # chinook_all | coho_harvest | all
 #     FISHERY_RE  <- "Snohomish"           # regex over fishery_name
 #     YEARS_MODE  <- "latest"              # latest | all
-#     FIT_CONFIG  <- "lite"                # lite (default) | quick | prod | smoke
+#     FIT_CONFIG  <- "smoke"               # lite (default) | smoke | quick | prod
 #
 # Usage -- from a shell, optionally several at once:
 #   Rscript analysis/bss_bias/01b_fit_catch_groups.R <group> [fishery-regex] [years]
@@ -77,12 +81,17 @@ library(here)
 # before a run you want to use different settings.
 args <- commandArgs(trailingOnly = TRUE)
 if (!exists("GROUP_KEY",  inherits = FALSE)) GROUP_KEY  <- if (length(args) >= 1) args[[1]] else "all"
-if (!exists("FISHERY_RE", inherits = FALSE)) FISHERY_RE <- if (length(args) >= 2) args[[2]] else "Snohomish|Stillaguamish"
-if (!exists("YEARS_MODE", inherits = FALSE)) YEARS_MODE <- if (length(args) >= 3) args[[3]] else "latest"
+if (!exists("FISHERY_RE", inherits = FALSE)) FISHERY_RE <- if (length(args) >= 2) args[[2]] else "Snohomish|Stillaguamish|Skagit fall salmon"
+if (!exists("YEARS_MODE", inherits = FALSE)) YEARS_MODE <- if (length(args) >= 3) args[[3]] else "all"
+# Resolved HERE with the other settings, not down in the run section. It used
+# to be assigned just before the loop, which left the scope echo below
+# referencing an object that did not exist yet.
+if (!exists("FIT_CONFIG",  inherits = FALSE)) FIT_CONFIG <- "lite"
 
-group_key  <- GROUP_KEY
-fishery_re <- FISHERY_RE
-years_mode <- YEARS_MODE
+group_key       <- GROUP_KEY
+fishery_re      <- FISHERY_RE
+years_mode      <- YEARS_MODE
+FIT_CONFIG_NAME <- FIT_CONFIG
 
 # Shared with 00d_catch_inventory.R so the inventory describes exactly the
 # groups these fits will use. Run 00d first -- it says which groups actually
@@ -146,12 +155,11 @@ cli::cli_alert_info("{.val {targets}}")
 # each of them with the "only if the caller has not" idiom, so these survive.
 # ------------------------------------------------------------------------------
 
+# FIT_CONFIG_NAME is resolved with the other settings at the top of this file.
+# "lite" by default -- see FIT_CONFIGS in 01 for why a light fit is defensible
+# for a catch-baseline run specifically, and only for one.
 CATCH_BASELINE_ONLY <- TRUE
 ONLY_FISHERIES      <- targets
-# "lite" by default: see FIT_CONFIGS in 01 for why a light fit is defensible
-# here specifically. Override by setting FIT_CONFIG before sourcing.
-if (!exists("FIT_CONFIG", inherits = FALSE)) FIT_CONFIG <- "lite"
-FIT_CONFIG_NAME     <- FIT_CONFIG
 
 for (k in keys) {
   cli::cli_h2("Catch group: {k}")
