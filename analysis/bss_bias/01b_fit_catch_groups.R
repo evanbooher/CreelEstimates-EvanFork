@@ -121,7 +121,12 @@ targets <- sort(unique(disc$fishery_name))
 
 cli::cli_h1("01b -- catch-group baseline fits")
 cli::cli_alert_info("Catch group{?s}: {.val {keys}}")
-cli::cli_alert_info("Fishery-year{?s} ({length(targets)}): {.val {targets}}")
+# Two calls on purpose: a cli string may carry only ONE quantity when it also
+# carries a {?s} plural marker, and "{length(targets)} ... {targets}" gives it
+# two -- which aborts with "Multiple quantities for pluralization" rather than
+# degrading. Same trap as the section-restriction message in 01.
+cli::cli_alert_info("Queued {length(targets)} fishery-year{?s}.")
+cli::cli_alert_info("{.val {targets}}")
 
 # ------------------------------------------------------------------------------
 # Run. Setting the knobs BEFORE sourcing 01 is what makes this work: 01 defines
