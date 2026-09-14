@@ -168,6 +168,31 @@ if (is.null(catch_base)) {
   )
 }
 
+# A fishery-year with ZERO records for a catch group is a RESULT, not a gap.
+# 01 skips those at its "no matching records" guard, so they never reach the
+# baseline file -- and in a Chinook-impact table an absent row reads as
+# "not examined" when it means "examined, and the answer was none". That
+# distinction matters most for exactly the impact-limited groups where a zero
+# is the finding. Carried over from 00d's inventory with catch = 0.
+inv_path <- file.path(OUT_DIR, "bss_catch_inventory.csv")
+if (file.exists(inv_path) && !is.null(catch_base)) {
+  zero_rows <- read_csv(inv_path, show_col_types = FALSE) |>
+    filter(!is.na(catch_group), !is.na(n_records), n_records == 0) |>
+    transmute(fishery_name, est_cg, C_sum_median = 0,
+              baseline_source = "zero encounters (no records)")
+  if (nrow(zero_rows) > 0) {
+    catch_base <- catch_base |>
+      mutate(baseline_source = "fitted") |>
+      bind_rows(anti_join(zero_rows, catch_base, by = c("fishery_name", "est_cg")))
+    cli::cli_alert_info(
+      "Carried {nrow(zero_rows)} zero-encounter fishery-year x group combination{?s} \\
+       from the inventory as catch = 0, so they read as examined rather than missing."
+    )
+  }
+} else if (!is.null(catch_base)) {
+  catch_base <- mutate(catch_base, baseline_source = "fitted")
+}
+
 dat <- b_summary |>
   left_join(
     comp |> select(fishery_name, basin, fishery_label, fishery_type, year_start),
@@ -355,19 +380,21 @@ T7 <- tier_grid |>
 # catch group, because the multiplier is identical across groups.
 if (!is.null(catch_base) && all(c("fishery_name", "est_cg", "C_sum_median") %in% names(catch_base))) {
   T7 <- T7 |>
-    left_join(catch_base |> select(fishery_name, est_cg, C_sum_median),
+    left_join(catch_base |> select(fishery_name, est_cg, C_sum_median, baseline_source),
               by = "fishery_name", relationship = "many-to-many") |>
+    # A zero baseline stays zero at every b: 0 * anything is 0. That is correct
+    # and worth seeing -- no value of b turns an unobserved encounter into one.
     mutate(catch_estimate = C_sum_median * catch_multiplier)
 } else {
   T7 <- T7 |> mutate(est_cg = NA_character_, C_sum_median = NA_real_,
-                     catch_estimate = NA_real_)
+                     baseline_source = NA_character_, catch_estimate = NA_real_)
 }
 
 T7 <- T7 |>
   select(basin, fishery_type, fishery_name, year_start, bias_type,
          tier, tier_kind, b_fitted, b_alt, catch_multiplier, pct_change_catch,
-         direction, est_cg, catch_baseline = C_sum_median, catch_estimate,
-         informed_flag) |>
+         direction, est_cg, catch_baseline = C_sum_median, baseline_source,
+         catch_estimate, informed_flag) |>
   arrange(basin, fishery_type, year_start, bias_type, b_alt)
 
 write_csv(T7, file.path(OUT_DIR, "bss_b_T7_direct_sensitivity.csv"))
