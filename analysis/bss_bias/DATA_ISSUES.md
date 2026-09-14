@@ -188,3 +188,30 @@ likelihood, which is written for two.
 `01_fit_bss_bias.R` recodes against fixed `bank`/`boat` levels and writes the
 counts to `bss_b_angler_recode.csv`. A high drop rate there is a data-entry
 signal worth following up.
+
+---
+
+## 8. `fish_count` is stored as text in some fishery-years
+
+**Found:** 2026-09-14, while building `00d_catch_inventory.R`.
+
+**What happens:** `dwg$catch$fish_count` comes back as `character` rather than
+numeric for at least Skagit spring Chinook 2021 lower. Any arithmetic on it
+aborts — `sum()` raises `invalid 'type' (character) of argument`.
+
+**Why it matters:** a column whose type varies by fishery-year is a trap for
+every consumer, not just this one. Code that happens to be written against a
+numeric year works, and then fails the first time it meets a character year.
+The failure is at least loud; the dangerous version is a silent coercion that
+turns unparseable entries into `NA` and quietly drops fish from a total.
+
+**Handled here:** `00d_catch_inventory.R` coerces explicitly, counts the
+fishery-years affected and the number of values that would not parse, and
+reports both at the end of its run rather than absorbing them.
+
+**Not yet investigated:** whether the character values are all clean integers
+(so the type is cosmetic) or whether some carry text that represents real
+information — a range, a qualifier, a sentinel. Until someone looks, treat
+totals for the affected fishery-years as provisional. The BSS fits reach
+`fish_count` through a different path and are not known to be affected, but
+that has not been verified either.

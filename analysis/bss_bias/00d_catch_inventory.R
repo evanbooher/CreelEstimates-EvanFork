@@ -77,6 +77,26 @@ cached_dwg <- function(fishery_name) {
   readRDS(path)
 }
 
+# fish_count arrives as CHARACTER in some fishery-years -- confirmed in Skagit
+# spring Chinook 2021 lower, where sum() aborts with "invalid 'type'
+# (character) of argument". Coerced here rather than upstream because this
+# script must survive a ragged catch table; the count of affected
+# fishery-years is reported at the end so the typing problem stays visible
+# instead of being silently absorbed. Values that will not parse become NA and
+# are counted, never dropped quietly.
+COERCED <- new.env(parent = emptyenv())
+COERCED$fisheries <- character(0)
+COERCED$lost_rows <- 0L
+
+numeric_fish_count <- function(x, fishery_name) {
+  if (is.numeric(x)) return(x)
+  out <- suppressWarnings(as.numeric(as.character(x)))
+  lost <- sum(is.na(out) & !is.na(x) & trimws(as.character(x)) != "")
+  COERCED$fisheries <- union(COERCED$fisheries, fishery_name)
+  COERCED$lost_rows <- COERCED$lost_rows + lost
+  out
+}
+
 one_fishery <- function(fishery_name) {
   dwg <- cached_dwg(fishery_name)
   if (is.null(dwg) || is.null(dwg$catch) || !is.data.frame(dwg$catch)) {
@@ -86,6 +106,9 @@ one_fishery <- function(fishery_name) {
                   status = "not cached -- run 01 for this fishery-year first"))
   }
   catch <- dwg$catch
+  if ("fish_count" %in% names(catch)) {
+    catch$fish_count <- numeric_fish_count(catch$fish_count, fishery_name)
+  }
   needed <- c("species", "life_stage", "fin_mark", "fate", "fish_count")
   if (!all(needed %in% names(catch))) {
     return(tibble(fishery_name = fishery_name, catch_group = NA_character_,
@@ -132,16 +155,26 @@ write_csv(inventory, file.path(OUT_DIR, "bss_catch_inventory.csv"))
 
 # The raw breakdown, so the group patterns can be checked against what is
 # actually coded in the data rather than trusted.
+# try() per fishery-year: this is a diagnostic pass, and one ragged catch table
+# must not cost the other 27. An earlier version aborted the whole run here.
 species_detail <- map_dfr(targets, function(fn) {
-  dwg <- cached_dwg(fn)
-  if (is.null(dwg) || is.null(dwg$catch) || !is.data.frame(dwg$catch)) return(NULL)
-  if (!all(c("species", "fish_count") %in% names(dwg$catch))) return(NULL)
-  dwg$catch |>
-    mutate(across(any_of(c("species", "life_stage", "fin_mark", "fate")),
-                  ~replace_na(as.character(.), "NA"))) |>
-    count(across(any_of(c("species", "life_stage", "fin_mark", "fate"))),
-          wt = fish_count, name = "n_fish") |>
-    mutate(fishery_name = fn, .before = 1)
+  out <- try({
+    dwg <- cached_dwg(fn)
+    if (is.null(dwg) || is.null(dwg$catch) || !is.data.frame(dwg$catch)) return(NULL)
+    if (!all(c("species", "fish_count") %in% names(dwg$catch))) return(NULL)
+    dwg$catch |>
+      mutate(fish_count = numeric_fish_count(fish_count, fn)) |>
+      mutate(across(any_of(c("species", "life_stage", "fin_mark", "fate")),
+                    ~replace_na(as.character(.), "NA"))) |>
+      count(across(any_of(c("species", "life_stage", "fin_mark", "fate"))),
+            wt = fish_count, name = "n_fish") |>
+      mutate(fishery_name = fn, .before = 1)
+  }, silent = TRUE)
+  if (inherits(out, "try-error")) {
+    cli::cli_alert_warning("{fn}: species detail skipped -- {conditionMessage(attr(out, 'condition'))}")
+    return(NULL)
+  }
+  out
 })
 
 if (!is.null(species_detail) && nrow(species_detail) > 0) {
@@ -171,6 +204,20 @@ uncached <- inventory |> filter(str_detect(status, "not cached"))
 if (nrow(uncached) > 0) {
   cli::cli_h2("Not cached -- fetched by 01, not by this script")
   uncached |> distinct(fishery_name) |> print(n = Inf)
+}
+
+if (length(COERCED$fisheries) > 0) {
+  cli::cli_h2("Data issue: fish_count stored as text")
+  cli::cli_alert_warning(
+    "{length(COERCED$fisheries)} fishery-year{?s} had a character fish_count column, coerced to numeric here."
+  )
+  if (COERCED$lost_rows > 0) {
+    cli::cli_alert_danger(
+      "{COERCED$lost_rows} value{?s} would not parse as a number and became NA -- these are NOT counted in the totals above."
+    )
+  }
+  print(sort(COERCED$fisheries))
+  cli::cli_alert_info("Recorded in DATA_ISSUES.md. The BSS fits coerce elsewhere, so this affects this inventory, not the estimates.")
 }
 
 cli::cli_alert_info(
