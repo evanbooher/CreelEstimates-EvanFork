@@ -23,7 +23,6 @@
 #     RENDER_GROUPS     <- c("chinook_all", "coho_harvest")
 #     RENDER_PROJECT    <- "bss_bias"
 #     RENDER_SKIP_DONE  <- TRUE     # skip fishery-years that already have output
-#     RENDER_DRY_RUN    <- TRUE     # print the plan, render nothing
 #
 #   Run it serially and watch it. Each render is a full BSS fit; budget
 #   accordingly and check the first one before walking away.
@@ -52,7 +51,6 @@ if (!exists("RENDER_FISHERY_RE", inherits = FALSE)) RENDER_FISHERY_RE <- "Snohom
 if (!exists("RENDER_GROUPS",     inherits = FALSE)) RENDER_GROUPS     <- names(CATCH_GROUPS)
 if (!exists("RENDER_PROJECT",    inherits = FALSE)) RENDER_PROJECT    <- "bss_bias"
 if (!exists("RENDER_SKIP_DONE",  inherits = FALSE)) RENDER_SKIP_DONE  <- TRUE
-if (!exists("RENDER_DRY_RUN",    inherits = FALSE)) RENDER_DRY_RUN    <- FALSE
 
 RMD <- here::here("template_scripts", "fw_creel.Rmd")
 if (!file.exists(RMD)) cli::cli_abort("{.file {RMD}} not found.")
@@ -150,9 +148,7 @@ if (length(targets) == 0) {
   print(targets)
 }
 
-if (RENDER_DRY_RUN) {
-  cli::cli_alert_info("RENDER_DRY_RUN is TRUE -- stopping before any render.")
-} else if (length(targets) > 0) {
+if (length(targets) > 0) {
 
   # --------------------------------------------------------------------------
   # Render. Serial on purpose -- see 01b's history with concurrent runs sharing
