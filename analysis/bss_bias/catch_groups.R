@@ -72,3 +72,18 @@ match_catch_group <- function(catch_df, g) {
       stringr::str_detect(fate,       g$fate)
     )
 }
+
+# The catch groups as the data.frame that fw_creel.Rmd's `est_catch_groups`
+# param expects -- one row per group, columns species / life_stage / fin_mark /
+# fate. Passing several rows in ONE render is deliberate: fw_creel builds an
+# inputs_bss entry per unique est_cg and loops the fit over all of them, so a
+# single render produces every group for that fishery-year.
+catch_groups_df <- function(keys = names(CATCH_GROUPS)) {
+  bad <- setdiff(keys, names(CATCH_GROUPS))
+  if (length(bad) > 0) stop("Unknown catch group(s): ", paste(bad, collapse = ", "))
+  do.call(rbind, lapply(keys, function(k) {
+    g <- CATCH_GROUPS[[k]]
+    data.frame(species = g$species, life_stage = g$life_stage,
+               fin_mark = g$fin_mark, fate = g$fate, stringsAsFactors = FALSE)
+  }))
+}
