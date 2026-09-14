@@ -89,7 +89,7 @@
 #                                      where a C_sum baseline exists
 #   fig17_catch_ladder.png/.pdf
 #   fig18_loo_backtest.png/.pdf
-#   fig19_direct_sensitivity.png/.pdf
+#   fig19_exposure.png/.pdf        -- how far catch could move per series, ranked
 # ==============================================================================
 
 library(tidyverse)
@@ -650,39 +650,61 @@ fig18 <- ggplot(fig18_df, aes(x = factor(year_start), y = ratio_median, color = 
 
 save_fig(fig18, "fig18_loo_backtest", width = 11, height = 7)
 
-# fig19 -- the direct sensitivity. One line per fishery-year showing catch
-# against b, with that series' plausible b range shaded. This is the figure for
-# "what does changing b do", and it is deliberately the simplest one here.
-fig19_df <- T7 |>
-  filter(tier_kind == "round") |>
-  distinct(basin, fishery_type, year_start, bias_type, b_alt, catch_multiplier)
+# fig19 -- HOW EXPOSED IS EACH FISHERY to getting b wrong?
+#
+# An earlier version drew catch against b, one line per fishery-year. That was
+# the wrong form: catch = 1/b is deterministic and identical everywhere, so
+# every panel was the same fixed-slope line shifted sideways, and fig17 already
+# shows that curve once. Nothing about a fishery was visible in it.
+#
+# What actually differs between fisheries is how much of the curve is IN PLAY
+# -- how wide that series' plausible b range is, and therefore how far catch
+# could move. That is a range comparison across categories, so: one row per
+# series, a segment spanning the catch outcomes implied by its own prediction
+# interval, ordered by exposure. Reading down the axis ranks the fisheries by
+# how much a missed b would cost.
+exposure <- T2 |>
+  filter(!is.na(pooled_b), !is.na(pi_lb), !is.na(pi_ub), pi_lb > 0) |>
+  transmute(
+    basin, fishery_type, bias_type,
+    series = paste0(fishery_type, "  (", bias_type, ")"),
+    # b LOW -> catch UP, and vice versa: the multiplier flips the bounds.
+    mult_hi = pooled_b / pi_lb,
+    mult_lo = pooled_b / pi_ub,
+    span    = mult_hi / mult_lo
+  ) |>
+  arrange(span) |>
+  mutate(series = factor(series, levels = series))
 
-band_df <- T7 |>
-  filter(tier_kind == "empirical") |>
-  distinct(basin, fishery_type, bias_type, tier, b_alt) |>
-  pivot_wider(names_from = tier, values_from = b_alt) |>
-  rename(lo = `series PI low`, hi = `series PI high`)
+mult_breaks <- c(0.25, 0.5, 0.67, 1, 1.5, 2, 3, 4)
+mult_labels <- ifelse(
+  abs(mult_breaks - 1) < 1e-9, "no change",
+  sprintf("%+.0f%%", 100 * (mult_breaks - 1))
+)
 
-fig19 <- ggplot(fig19_df, aes(b_alt, catch_multiplier, group = year_start)) +
-  geom_rect(data = band_df, inherit.aes = FALSE,
-            aes(xmin = lo, xmax = hi, ymin = -Inf, ymax = Inf),
-            fill = GRID_COLOR, alpha = 0.55) +
-  geom_hline(yintercept = 1, color = BASELINE_COL, linewidth = 0.4) +
-  geom_line(aes(color = bias_type), linewidth = 0.7, alpha = 0.85) +
-  facet_grid(bias_type ~ fishery_type, switch = "y") +
-  scale_x_log10(breaks = c(0.5, 1, 1.5, 2)) +
-  scale_y_log10(breaks = c(0.5, 1, 2)) +
-  scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]),
-                     guide = "none") +
-  labs(
-    title = "Change b, and estimated catch moves as 1 / b",
-    subtitle = "One line per fitted fishery-year. Shaded band = that series' plausible range for b (T2 prediction interval).\nb below 1 pushes catch up; b above 1 pushes it down.",
-    x = "b (log scale)", y = "catch relative to the fitted estimate (log scale)",
-    caption = "No re-fitting: the relationship is exact where no census is collected. With census the effect is damped -- see T4."
+fig19 <- ggplot(exposure, aes(y = series, color = bias_type)) +
+  geom_vline(xintercept = 1, color = INK_SECOND, linewidth = 0.5, linetype = "22") +
+  geom_linerange(aes(xmin = mult_lo, xmax = mult_hi), linewidth = 2.4, alpha = 0.9) +
+  geom_point(aes(x = mult_lo), size = 2.2, shape = 18) +
+  geom_point(aes(x = mult_hi), size = 2.2, shape = 18) +
+  geom_text(
+    aes(x = mult_hi, label = sprintf("%.1fx span", span)),
+    hjust = -0.25, size = 3, color = INK_SECOND, show.legend = FALSE
   ) +
-  theme_bss()
+  scale_x_log10(breaks = mult_breaks, labels = mult_labels,
+                expand = expansion(mult = c(0.05, 0.22))) +
+  scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]),
+                     name = NULL) +
+  labs(
+    title = "How much could estimated catch move, if b is wrong?",
+    subtitle = "Each bar spans the catch outcomes implied by that series' own plausible range for b (T2 prediction interval).\nCatch goes as 1/b, so a LOW b pushes catch up and a HIGH b pushes it down.",
+    x = "Change in estimated catch (log scale)", y = NULL,
+    caption = "Census-free case, where the relationship is exact. Vehicle series are consistently tighter than trailer -- see the T6 calibration table for why that matters."
+  ) +
+  theme_bss() +
+  theme(panel.grid.major.y = element_blank())
 
-save_fig(fig19, "fig19_direct_sensitivity", width = 11, height = 5.5)
+save_fig(fig19, "fig19_exposure", width = 10, height = 5.5)
 
 cli::cli_alert_success("Figures written to {.path {FIG_DIR}}.")
 
