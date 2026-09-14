@@ -208,8 +208,17 @@ align_bss_sections <- function(dwg_summ, days, fishery_name) {
 # ------------------------------------------------------------------------------
 
 apply_bss_input_fixes <- function(dwg_summ, days, fishery_name) {
+  # interview and effort_census ONLY -- deliberately NOT effort_index.
+  #
+  # effort_index legitimately carries `total` rows: an index count of total
+  # anglers, not split into bank and boat. Those are not unclassifiable
+  # angler types, they are a different KIND of count, and prep_inputs_bss()
+  # routes them to A_I rather than through angler_final_int. Recoding that
+  # table drops about half its rows and trips the >50% guard below -- which is
+  # the guard doing its job on a table that should never have been passed to
+  # it. 01_fit_bss_bias.R has always recoded just these two.
   recode_log <- list()
-  for (nm in c("interview", "effort_index", "effort_census")) {
+  for (nm in c("interview", "effort_census")) {
     if (is.null(dwg_summ[[nm]])) next
     r <- recode_angler_final_int(dwg_summ[[nm]], nm)
     dwg_summ[[nm]] <- r$data
