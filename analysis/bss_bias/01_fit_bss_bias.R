@@ -374,7 +374,25 @@ validate_days <- function(days, fishery_name) {
 # right now is ever removed-then-re-added. Every row_df passed in here
 # carries a fishery_name column (comparability_row, stan_dims_row,
 # bias_summary, na_drop_log all do).
+# Per-process output tag. append_csv_row() is a read-modify-write: it reads the
+# whole CSV, drops this fishery's old row, and rewrites the file. That is safe
+# for one process and NOT safe for several -- two concurrent runs will have one
+# truncating the file while the other reads it, and the reader then fails with
+# "object 'fishery_name' not found" (its read came back with no columns), or on
+# Windows with "mapping error: The handle is invalid".
+#
+# So a parallel run gives every process its OWN files, merged afterwards, rather
+# than trying to make the shared write atomic. 01b_fit_catch_groups.R sets this;
+# a normal single-process run leaves it "" and nothing changes.
+if (!exists("OUTPUT_TAG", inherits = FALSE)) OUTPUT_TAG <- ""
+
+tagged_path <- function(path) {
+  if (!nzchar(OUTPUT_TAG)) return(path)
+  sub("\\.csv$", paste0("__", OUTPUT_TAG, ".csv"), path)
+}
+
 append_csv_row <- function(row_df, path) {
+  path <- tagged_path(path)
   if (file.exists(path)) {
     # Force the re-read to use row_df's ACTUAL column types rather than
     # read_csv()'s own guess from the file's text. Columns built via

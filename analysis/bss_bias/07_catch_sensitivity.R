@@ -144,8 +144,19 @@ dims      <- req(file.path(OUT_DIR, "bss_b_stan_dims.csv"),     "01_fit_bss_bias
 # result below is still complete, just expressed as a percentage rather than in
 # fish. Do not make this a hard dependency -- the MCMC that produces it takes
 # hours and the analysis must not wait on it.
-catch_path <- file.path(OUT_DIR, "bss_catch_baseline.csv")
-catch_base <- if (file.exists(catch_path)) read_csv(catch_path, show_col_types = FALSE) else NULL
+# Globbed, not a single path: 01b runs as several concurrent processes and each
+# writes its own tagged file (see OUTPUT_TAG in 01), because append_csv_row() is
+# a read-modify-write that concurrent runs corrupt. distinct() on the key
+# absorbs the one overlap that can occur -- the same fishery-year fitted under
+# the same catch group by two jobs whose fishery filters overlap.
+catch_files <- list.files(OUT_DIR, pattern = "^bss_catch_baseline.*\\.csv$", full.names = TRUE)
+catch_base <- if (length(catch_files) > 0) {
+  map_dfr(catch_files, ~read_csv(.x, show_col_types = FALSE, col_types = cols(.default = col_guess()))) |>
+    distinct(fishery_name, est_cg, .keep_all = TRUE)
+} else NULL
+if (length(catch_files) > 1) {
+  cli::cli_alert_info("Merged {length(catch_files)} catch-baseline files from parallel 01b runs.")
+}
 if (is.null(catch_base)) {
   cli::cli_alert_info(
     "No {.file bss_catch_baseline.csv} -- results will be in percent only. \\

@@ -41,6 +41,13 @@
 #   cores, so on an 8-core machine run FOUR invocations concurrently and no
 #   more -- see the run block at the bottom of this file.
 #
+#   CONCURRENCY: 01's append_csv_row() is a read-modify-write over the whole
+#   CSV, which is not safe for several processes at once. Each run therefore
+#   sets OUTPUT_TAG so it writes its own files (..._<group>_<fisheries>.csv);
+#   07_catch_sensitivity.R globs and merges them. Do not remove the tag to
+#   "tidy up" the output directory -- concurrent runs will corrupt each
+#   other's reads silently before they fail loudly.
+#
 # Outputs (appended, one row per fishery-year x catch group):
 #   bss_catch_baseline.csv        -- C_sum / E_sum posterior summaries  <- 07 reads this
 #   bss_b_invariance_check.csv    -- the `b` this run produced, for the check above
@@ -140,6 +147,12 @@ FIT_CONFIG_NAME     <- "quick"
 for (k in keys) {
   cli::cli_h2("Catch group: {k}")
   RUN_CATCH_GROUP <- CATCH_GROUPS[[k]]
+  # Every CSV this process writes gets its own name. append_csv_row() in 01 is
+  # a read-modify-write and is not safe for concurrent processes -- without
+  # this, two jobs racing on bss_b_comparability_raw.csv leave one of them
+  # reading a truncated file and failing with "object 'fishery_name' not
+  # found". Merged back together by 07_catch_sensitivity.R, which globs.
+  OUTPUT_TAG <- gsub("[^[:alnum:]]+", "_", paste(k, fishery_re, sep = "_"))
   source(here::here("analysis", "bss_bias", "01_fit_bss_bias.R"), local = FALSE)
 }
 
@@ -163,10 +176,9 @@ cli::cli_alert_success(
 #     Rscript analysis/bss_bias/01b_fit_catch_groups.R coho_harvest Stillaguamish latest &
 #     wait
 #
-# NOTE on concurrent appends: all four processes append to the same
-# bss_catch_baseline.csv. Row-level interleaving is possible if two finish in
-# the same instant; the four fishery/group combinations above are disjoint, so
-# a duplicate row is the worst case and is removed by a distinct() on
-# (fishery_name, est_cg). If that ever bites, run the two groups sequentially
-# instead of splitting by group.
+# Concurrent appends are handled by OUTPUT_TAG (see the header): each process
+# writes its own CSVs and 07 merges them. The per-fishery DWG cache is read-only
+# by the time these run -- if a fishery-year has never been fetched, run it once
+# on its own first so the two catch-group jobs for it do not race on writing the
+# same cache file.
 # ------------------------------------------------------------------------------
