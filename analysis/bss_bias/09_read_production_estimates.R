@@ -233,6 +233,13 @@ read_one <- function(row) {
       E_sum_bank_median = e_bank$median, E_sum_boat_median = e_boat$median,
       C_sum_bank_q2.5 = c_bank$q2.5, C_sum_bank_q97.5 = c_bank$q97.5,
       C_sum_boat_q2.5 = c_boat$q2.5, C_sum_boat_q97.5 = c_boat$q97.5,
+      # USE THESE SHARES DOWNSTREAM, NOT THE GEAR MEDIANS AS ADDENDS.
+      # C_sum_bank_median + C_sum_boat_median is NOT C_sum_median -- the median
+      # of a sum is not the sum of the medians, and the two land a few percent
+      # apart. The reconciliation check above compares median(rowSums(gear))
+      # against median(C_sum), which is the right comparison and does agree, so
+      # it correctly stays silent here. Anything reporting a gear total should
+      # take share x C_sum_median, so it adds back to the fitted total exactly.
       boat_share_catch  = c_boat$median / (c_bank$median + c_boat$median),
       boat_share_effort = e_boat$median / (e_bank$median + e_boat$median),
       R_V_bank = rvg(rv, 1), R_V_boat = rvg(rv, 2),

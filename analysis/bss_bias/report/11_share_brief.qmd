@@ -449,7 +449,11 @@ fish |>
   ggplot(aes(y = fct_rev(factor(fishery_name)), color = bias_type)) +
   geom_linerange(aes(xmin = if_b_high, xmax = if_b_low),
                  position = position_dodge(width = 0.55), linewidth = 2.2, alpha = 0.9) +
-  geom_point(aes(x = fitted), position = position_dodge(width = 0.55),
+  # group = bias_type explicitly: setting color outside aes() strips the only
+  # discrete aesthetic from this layer, so position_dodge() has nothing to
+  # dodge by and the white halo lands on the row centre while the coloured
+  # point it is supposed to sit under is offset.
+  geom_point(aes(x = fitted, group = bias_type), position = position_dodge(width = 0.55),
              size = 2.6, color = SURFACE) +
   geom_point(aes(x = fitted), position = position_dodge(width = 0.55), size = 1.8) +
   facet_wrap(~group, scales = "free_x") +

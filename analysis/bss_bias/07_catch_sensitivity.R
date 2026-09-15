@@ -474,6 +474,20 @@ if (!is.null(catch_base) && all(c("fishery_name", "est_cg", "C_sum_median") %in%
   # these are the model's own gear totals rather than a share applied after the
   # fact. Without those columns the vehicle form is used for both and a warning
   # says so.
+  # THE GEAR SPLIT IS USED AS A SHARE, NEVER AS AN ADDEND.
+  #
+  # C_sum_bank_median + C_sum_boat_median does NOT equal C_sum_median: the
+  # median of a sum is not the sum of the medians. 09's reconciliation check
+  # compares median(rowSums(gear)) against median(C_sum), which do agree, so it
+  # never fires on this -- but adding the two gear medians together lands a few
+  # percent away from the fitted total.
+  #
+  # Doing that put a DIFFERENT "as fitted" catch on the trailer row than on the
+  # vehicle row for the same fishery and catch group (99 vs 106 fish for
+  # Stillaguamish 2023-24 coho), which is impossible -- the anchor is the same
+  # fit at its own b. Taking boat share = boat/(bank+boat) and applying it to
+  # C_sum_median makes the anchor exactly C_sum_median for both terms, and uses
+  # the gear split for the one thing it is reliable for: proportion.
   gear_cols <- c("C_sum_bank_median", "C_sum_boat_median")
   have_gear <- all(gear_cols %in% names(catch_base))
   if (!have_gear) {
@@ -492,10 +506,15 @@ if (!is.null(catch_base) && all(c("fishery_name", "est_cg", "C_sum_median") %in%
     mutate(
       # A zero baseline stays zero at every b: 0 * anything is 0. Correct, and
       # worth seeing -- no value of b turns an unobserved encounter into one.
+      boat_share = if (have_gear) {
+        C_sum_boat_median / (C_sum_bank_median + C_sum_boat_median)
+      } else {
+        NA_real_
+      },
       catch_estimate = if (have_gear) {
         case_when(
-          bias_type == "trailer" & !is.na(C_sum_boat_median) ~
-            C_sum_bank_median + C_sum_boat_median * catch_multiplier,
+          bias_type == "trailer" & is.finite(boat_share) ~
+            C_sum_median * ((1 - boat_share) + boat_share * catch_multiplier),
           TRUE ~ C_sum_median * catch_multiplier
         )
       } else {
@@ -516,7 +535,8 @@ T7 <- T7 |>
   select(basin, fishery_type, fishery_name, year_start, bias_type,
          tier, tier_kind, b_fitted, b_alt, catch_multiplier, pct_change_catch,
          direction, est_cg, catch_baseline = C_sum_median, baseline_source,
-         catch_estimate, pct_change_catch_total, informed_flag) |>
+         any_of("boat_share"), catch_estimate, pct_change_catch_total,
+         informed_flag) |>
   arrange(basin, fishery_type, year_start, bias_type, b_alt)
 
 write_csv(T7, file.path(OUT_DIR, "bss_b_T7_direct_sensitivity.csv"))
@@ -554,7 +574,8 @@ cli::cli_alert_success("T7 direct sensitivity written ({nrow(T7)} rows).")
 # and carries no b.
 # ------------------------------------------------------------------------------
 
-gear_cols_t8 <- c("C_sum_bank_median", "C_sum_boat_median",
+gear_cols_t8 <- c("C_sum_median", "E_sum_median",
+                  "C_sum_bank_median", "C_sum_boat_median",
                   "E_sum_bank_median", "E_sum_boat_median", "rho")
 
 if (!is.null(catch_base) && all(gear_cols_t8 %in% names(catch_base))) {
@@ -574,14 +595,18 @@ if (!is.null(catch_base) && all(gear_cols_t8 %in% names(catch_base))) {
       k2 = if_else(bias_type == "trailer", catch_multiplier, 1),
       f_bank = k1 * (1 + rho) - rho * k2,
       f_boat = k2,
-      effort_bank = E_sum_bank_median * f_bank,
-      effort_boat = E_sum_boat_median * f_boat,
-      catch_bank  = C_sum_bank_median * f_bank,
-      catch_boat  = C_sum_boat_median * f_boat,
+      # Shares of the model's own totals, not the gear medians themselves --
+      # see the note in T7. Adding the gear medians gives a number a few percent
+      # off C_sum_median, which is what made the anchor row disagree with itself.
+      boat_share_c = C_sum_boat_median / (C_sum_bank_median + C_sum_boat_median),
+      boat_share_e = E_sum_boat_median / (E_sum_bank_median + E_sum_boat_median),
+      effort_bank = E_sum_median * (1 - boat_share_e) * f_bank,
+      effort_boat = E_sum_median * boat_share_e * f_boat,
+      catch_bank  = C_sum_median * (1 - boat_share_c) * f_bank,
+      catch_boat  = C_sum_median * boat_share_c * f_boat,
       catch_total = catch_bank + catch_boat,
       effort_total = effort_bank + effort_boat,
-      pct_change_catch_total =
-        100 * (catch_total / (C_sum_bank_median + C_sum_boat_median) - 1)
+      pct_change_catch_total = 100 * (catch_total / C_sum_median - 1)
     )
 
   # A negative gear total means the solve has been pushed outside the range
@@ -601,7 +626,7 @@ if (!is.null(catch_base) && all(gear_cols_t8 %in% names(catch_base))) {
 
   T8 <- T8 |>
     select(basin, fishery_type, fishery_name, year_start, est_cg, bias_type, tier,
-           tier_kind, b_fitted, b_alt, rho,
+           tier_kind, b_fitted, b_alt, rho, boat_share_c, boat_share_e,
            catch_bank, catch_boat, catch_total,
            effort_bank, effort_boat, effort_total,
            pct_change_catch_total, any_of("baseline_source")) |>
