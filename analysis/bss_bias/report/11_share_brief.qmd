@@ -367,49 +367,9 @@ as_fitted |>
               row_group.font.weight = "bold")
 ```
 
-```{r gear-math, eval = FALSE, results = "asis"}
-cat(r"---(
-::: {.callout-note collapse="true"}
-## How the two terms divide the fishery between them
 
-The two counts are satisfied at the same time, with trailers per bank angler at
-essentially zero:
-
-$$
-egin{aligned}
-\lambda_{	ext{bank}} R_{V1} + \lambda_{	ext{boat}} R_{V2} &= V_I / b_1\
-\lambda_{	ext{bank}} R_{T1} + \lambda_{	ext{boat}} R_{T2} &= T_I / b_2
-\end{aligned}
-$$
-
-Writing $k_1 = b_1^{	ext{fitted}}/b_1$ and $k_2 = b_2^{	ext{fitted}}/b_2$, the
-trailer equation pins boat effort and the vehicle equation then determines bank:
-
-$$
-rac{\lambda_{	ext{boat}}}{\lambda_{	ext{boat}}^{0}} = k_2,
-\qquad
-rac{\lambda_{	ext{bank}}}{\lambda_{	ext{bank}}^{0}} = k_1(1+
-ho) - 
-ho\, k_2
-$$
-
-where $
-ho = (R_{V2}/R_{V1})\cdot(\lambda_{	ext{boat}}^{0}/\lambda_{	ext{bank}}^{0})$
-is the boat-to-bank ratio of the vehicle count.
-
-Two things follow that the simpler treatment misses. Moving $b_1$ alone does
-**not** cleanly rescale the whole fishery, because boat effort is held in place
-by the trailer counts, so the entire adjustment lands on bank. And moving $b_2$
-alone does **not** leave bank untouched, because lowering boat effort frees
-vehicle count to be attributed to bank, which pushes bank the other way. The two
-partly offset each other.
-
-Catch follows effort within each gear, since the catch rate is gear-specific and
-carries no $b$.
-:::
-
-### The same range of `b`, in fish
-)---")
+```{r fish-heading, eval = HAVE_FISH, results = "asis"}
+cat("\n### The same range of `b`, in fish\n\n")
 ```
 
 ```{r fish-table, eval = HAVE_FISH}
