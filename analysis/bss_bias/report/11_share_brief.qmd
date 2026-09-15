@@ -343,14 +343,6 @@ cat(r"---(
 
 The percentages above hold for every species and catch group. Below they are
 put in fish, using the fitted season totals, and split between bank and boat.
-
-The vehicle index counts vehicles, which every angler arrives in, so `b[1]`
-rescales the **whole fishery**. The trailer index counts boat trailers, and
-trailers per bank angler come out at essentially zero in the interviews, so the
-trailer count observes **boat anglers alone**. The boat share below is therefore
-what sets how much of the fishery the trailer term can move at all: where a
-fishery is mostly fished from the bank, getting that term wrong costs
-correspondingly little.
 )---")
 ```
 
