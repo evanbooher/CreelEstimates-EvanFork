@@ -47,7 +47,11 @@ group_label <- function(x) {
 wide <- T7 |>
   filter(tier_kind %in% c("anchor", "empirical")) |>
   mutate(group = group_label(est_cg)) |>
-  select(fishery_name, year_start, bias_type, group, tier, catch_estimate, pct_change_catch) |>
+  # pct_change_catch_total, not pct_change_catch: the first is the change in
+  # the whole fishery's catch, which is what a reader quotes. They differ for
+  # trailer, where only the boat component moves.
+  select(fishery_name, year_start, bias_type, group, tier,
+         catch_estimate, pct_change_catch = pct_change_catch_total) |>
   pivot_wider(names_from = tier, values_from = c(catch_estimate, pct_change_catch)) |>
   transmute(
     fishery_name, year_start, bias_type, group,

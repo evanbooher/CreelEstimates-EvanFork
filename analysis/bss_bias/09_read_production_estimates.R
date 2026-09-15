@@ -111,6 +111,35 @@ summarise_vec <- function(x) {
   )
 }
 
+# C_sum and E_sum are scalars summed over section, day AND gear. The gear split
+# matters because the two bias terms do not act on the same anglers:
+#
+#   V_I ~ Poisson((lambda_bank*R_V[1] + lambda_boat*R_V[2]) * b[1])
+#   T_I ~ Poisson((lambda_bank*R_T[1] + lambda_boat*R_T[2]) * b[2])
+#
+# R_T[1] -- trailers per BANK angler -- goes to ~0 from the interviews, so the
+# trailer count observes boat effort essentially alone while the vehicle count
+# observes both. An error in b[2] therefore moves the boat component only, and
+# treating it as if it moved the whole fishery overstates it.
+#
+# C[s][d,g] and E[s][d,g] are full arrays in generated quantities and fw_creel
+# calls fit_bss() without pars=, so they survive in the draws. Summing them per
+# draw over section and day -- keeping gear -- gives the gear totals with their
+# full posterior, rather than a share applied after the fact.
+#
+# rstan::extract() returns these as [iterations, S, D, G]; margins 1 and 4 are
+# draw and gear.
+gear_totals <- function(arr) {
+  if (is.null(arr)) return(NULL)
+  d <- dim(arr)
+  if (length(d) != 4) return(NULL)
+  apply(arr, c(1, 4), sum, na.rm = TRUE)   # -> [iterations, G]
+}
+
+# g = 1 bank, g = 2 boat: the order recode_angler_final_int() enforces via
+# ANGLER_LEVELS. A fit with some other G is labelled positionally and flagged.
+GEAR_LABELS <- c("bank", "boat")
+
 # Rhat lives in summary(fit)$summary, rownames = parameter. Returned as NA
 # rather than dropped when absent, so a missing diagnostic is visible.
 rhat_of <- function(summ, par) {
@@ -139,6 +168,35 @@ read_one <- function(row) {
     cs <- summarise_vec(draws$C_sum)
     es <- if (!is.null(draws$E_sum)) summarise_vec(draws$E_sum) else summarise_vec(NA_real_)
 
+    # Gear totals, per draw. NULL where the arrays are absent (a fit run with
+    # pars= would drop them), in which case the gear columns come back NA
+    # rather than the row being dropped.
+    cg <- gear_totals(draws$C)
+    eg <- gear_totals(draws$E)
+    n_gear <- if (!is.null(cg)) ncol(cg) else 0L
+    if (n_gear > length(GEAR_LABELS)) {
+      cli::cli_alert_warning(
+        "{row$fishery_name} / {ecg}: G = {n_gear} gear types; only {length(GEAR_LABELS)} are \\
+         labelled, the rest are dropped."
+      )
+    }
+    gv <- function(m, g) if (!is.null(m) && ncol(m) >= g) summarise_vec(m[, g]) else summarise_vec(NA_real_)
+    c_bank <- gv(cg, 1); c_boat <- gv(cg, 2)
+    e_bank <- gv(eg, 1); e_boat <- gv(eg, 2)
+
+    # Sanity: the gear totals must add back to C_sum. A mismatch means the
+    # array is not what this assumes, and every gear-split number below would
+    # be wrong -- better to hear about it than to publish it.
+    if (!is.null(cg) && is.finite(cs$median) && cs$median > 0) {
+      recon <- stats::median(rowSums(cg), na.rm = TRUE)
+      if (abs(recon - cs$median) / cs$median > 0.01) {
+        cli::cli_alert_danger(
+          "{row$fishery_name} / {ecg}: gear totals sum to {round(recon)} but C_sum is \\
+           {round(cs$median)} -- the gear split is NOT trustworthy for this row."
+        )
+      }
+    }
+
     # Observed CPUE from the vectors the model was handed, when the inputs were
     # saved. sum(c)/sum(h) is fish per person-hour, the same units as lambda_C,
     # which makes it directly comparable to C_sum/E_sum.
@@ -164,6 +222,13 @@ read_one <- function(row) {
       E_sum_mean = es$mean, E_sum_sd = es$sd, E_sum_median = es$median,
       E_sum_q2.5 = es$q2.5, E_sum_q97.5 = es$q97.5,
       E_sum_n_finite_frac = es$n_finite_frac,
+      C_sum_bank_median = c_bank$median, C_sum_boat_median = c_boat$median,
+      E_sum_bank_median = e_bank$median, E_sum_boat_median = e_boat$median,
+      C_sum_bank_q2.5 = c_bank$q2.5, C_sum_bank_q97.5 = c_bank$q97.5,
+      C_sum_boat_q2.5 = c_boat$q2.5, C_sum_boat_q97.5 = c_boat$q97.5,
+      boat_share_catch  = c_boat$median / (c_bank$median + c_boat$median),
+      boat_share_effort = e_boat$median / (e_bank$median + e_boat$median),
+      n_gear = n_gear,
       n_draws = cs$n_draws,
       C_sum_rhat = rhat_of(e$summary, "C_sum"),
       E_sum_rhat = rhat_of(e$summary, "E_sum"),
@@ -222,8 +287,9 @@ cli::cli_alert_success("Wrote {nrow(baseline)} baseline row{?s} to {.file bss_ca
 cli::cli_h2("Season totals")
 baseline |>
   mutate(group = str_extract(est_cg, "^[^_]+")) |>
-  select(fishery_name, group, C_sum_median, E_sum_median,
-         obs_fish, obs_cpue, model_cpue, C_sum_rhat, n_draws) |>
+  select(fishery_name, group, C_sum_median, C_sum_bank_median, C_sum_boat_median,
+         boat_share_catch, E_sum_median, obs_fish, obs_cpue, model_cpue,
+         C_sum_rhat, n_draws) |>
   arrange(fishery_name, group) |>
   print(n = Inf)
 

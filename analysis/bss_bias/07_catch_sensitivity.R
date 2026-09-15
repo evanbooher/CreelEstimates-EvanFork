@@ -447,22 +447,70 @@ T7 <- tier_grid |>
 # In fish, wherever a C_sum baseline exists. One ratio row becomes one row per
 # catch group, because the multiplier is identical across groups.
 if (!is.null(catch_base) && all(c("fishery_name", "est_cg", "C_sum_median") %in% names(catch_base))) {
+  # --- The two bias terms do not act on the same anglers ----------------------
+  #
+  #   V_I ~ Poisson((lambda_bank*R_V[1] + lambda_boat*R_V[2]) * b[1])
+  #   T_I ~ Poisson((lambda_bank*R_T[1] + lambda_boat*R_T[2]) * b[2])
+  #
+  # R_T[1], trailers per BANK angler, goes to ~0 from the interviews. So the
+  # trailer count observes boat effort essentially alone, while the vehicle
+  # count observes both gear types. Scaling b[1] rescales the whole fishery;
+  # scaling b[2] rescales the BOAT component and leaves bank where it was:
+  #
+  #   vehicle:  C_new = (C_bank + C_boat) * b_fitted/b_alt
+  #   trailer:  C_new =  C_bank + C_boat  * b_fitted/b_alt
+  #
+  # Applying the vehicle form to trailer -- which this did until the gear
+  # totals existed -- reports the boat-component effect as if it were the whole
+  # fishery. That is what produced the -58% / +260% trailer rows.
+  #
+  # 09 aggregates C[s][d,g] over section and day per draw, keeping gear, so
+  # these are the model's own gear totals rather than a share applied after the
+  # fact. Without those columns the vehicle form is used for both and a warning
+  # says so.
+  gear_cols <- c("C_sum_bank_median", "C_sum_boat_median")
+  have_gear <- all(gear_cols %in% names(catch_base))
+  if (!have_gear) {
+    cli::cli_alert_warning(
+      "Baseline has no gear split ({.field {gear_cols}}) -- trailer rows will scale the WHOLE \\
+       fishery and therefore overstate the effect. Re-run 09_read_production_estimates.R."
+    )
+  }
+
   T7 <- T7 |>
-    left_join(catch_base |> select(fishery_name, est_cg, C_sum_median, baseline_source),
-              by = "fishery_name", relationship = "many-to-many") |>
-    # A zero baseline stays zero at every b: 0 * anything is 0. That is correct
-    # and worth seeing -- no value of b turns an unobserved encounter into one.
-    mutate(catch_estimate = C_sum_median * catch_multiplier)
+    left_join(
+      catch_base |> select(fishery_name, est_cg, C_sum_median, baseline_source,
+                           any_of(gear_cols)),
+      by = "fishery_name", relationship = "many-to-many"
+    ) |>
+    mutate(
+      # A zero baseline stays zero at every b: 0 * anything is 0. Correct, and
+      # worth seeing -- no value of b turns an unobserved encounter into one.
+      catch_estimate = if (have_gear) {
+        case_when(
+          bias_type == "trailer" & !is.na(C_sum_boat_median) ~
+            C_sum_bank_median + C_sum_boat_median * catch_multiplier,
+          TRUE ~ C_sum_median * catch_multiplier
+        )
+      } else {
+        C_sum_median * catch_multiplier
+      },
+      # The percent change a reader should quote: against the whole fishery for
+      # vehicle, and against the whole fishery for trailer too -- the boat
+      # component is what moved, but the catch estimate is the total.
+      pct_change_catch_total = 100 * (catch_estimate / C_sum_median - 1)
+    )
 } else {
   T7 <- T7 |> mutate(est_cg = NA_character_, C_sum_median = NA_real_,
-                     baseline_source = NA_character_, catch_estimate = NA_real_)
+                     baseline_source = NA_character_, catch_estimate = NA_real_,
+                     pct_change_catch_total = NA_real_)
 }
 
 T7 <- T7 |>
   select(basin, fishery_type, fishery_name, year_start, bias_type,
          tier, tier_kind, b_fitted, b_alt, catch_multiplier, pct_change_catch,
          direction, est_cg, catch_baseline = C_sum_median, baseline_source,
-         catch_estimate, informed_flag) |>
+         catch_estimate, pct_change_catch_total, informed_flag) |>
   arrange(basin, fishery_type, year_start, bias_type, b_alt)
 
 write_csv(T7, file.path(OUT_DIR, "bss_b_T7_direct_sensitivity.csv"))
