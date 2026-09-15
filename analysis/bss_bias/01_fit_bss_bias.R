@@ -576,6 +576,24 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   # resolving here when called directly, e.g. interactively.
   est_dates <- est_dates %||% resolve_window(fishery_name)
   if (is.null(est_dates)) skip_fishery(window_skip_reason(), stage = "resolve_dates")
+
+  # A window restriction from scope_rules.R overrides the lookup window, exactly
+  # as a section restriction overrides the fishery's full section set. Applied
+  # HERE rather than in resolve_window() so the ledger's comparability row
+  # records the window the fit actually used.
+  #
+  # trim_to_last_sampled is NOT applied here: it needs dwg, which is fetched
+  # below. It runs after the section restriction, further down.
+  .win <- fishery_window_limit(fishery_name)
+  if (!is.null(.win)) {
+    cli::cli_alert_info(
+      "  Window scope: {.val {.win$est_date_start}} to {.val {.win$est_date_end}} \\
+       (lookup gave {.val {est_dates$est_date_start}} to {.val {est_dates$est_date_end}})."
+    )
+    est_dates$est_date_start <- .win$est_date_start
+    est_dates$est_date_end   <- .win$est_date_end
+  }
+
   date_start <- suppressWarnings(as.Date(est_dates$est_date_start))
   date_end   <- suppressWarnings(as.Date(est_dates$est_date_end))
 
@@ -587,6 +605,31 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   # Must run BEFORE preflight so `sections`, prep_days()'s open_section_*
   # columns and prep_inputs_bss()'s S/O/p_TI all agree on the reduced set.
   dwg <- run_stage("restrict_sections", restrict_dwg_sections(dwg, fishery_name))
+
+  # Pull the window end back to the last day actually surveyed, AFTER the
+  # section restriction so "surveyed" means surveyed in the retained sections.
+  # Trailing unsampled days carry no index counts, so they do not inform `b`
+  # directly -- but they sit in prep_days()'s grid and inflate the season totals
+  # that `b` is used to rescale.
+  if (!is.null(.win) && isTRUE(.win$trim_to_last_sampled)) {
+    .sampled <- c(
+      suppressWarnings(as.Date(dwg$effort$event_date)),
+      suppressWarnings(as.Date(dwg$interview$event_date))
+    )
+    .sampled <- .sampled[!is.na(.sampled) & .sampled <= date_end]
+    if (length(.sampled) == 0) {
+      skip_fishery("Nothing sampled within the restricted window.", stage = "trim_window")
+    }
+    .last <- max(.sampled)
+    if (.last < date_end) {
+      cli::cli_alert_info(
+        "  Window trimmed to last sampled date: {.val {as.character(.last)}} \\
+         ({as.integer(date_end - .last)} unsampled days removed)."
+      )
+      date_end <- .last
+      est_dates$est_date_end <- as.character(.last)
+    }
+  }
 
   pf <- run_stage("preflight", preflight_fishery(dwg, fishery_name, date_start, date_end, study_design))
 

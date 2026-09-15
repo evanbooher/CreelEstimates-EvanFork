@@ -91,7 +91,96 @@ SECTION_RESTRICTIONS <- list()
 WATER_BODY_RESTRICTIONS <- list(
   list(pattern = regex("Skagit fall salmon", ignore_case = TRUE), keep = "Skagit"),
   list(pattern = regex("Skagit spring Chinook.*upper", ignore_case = TRUE), keep = "Skagit")
+  # STILLAGUAMISH IS UNRESTRICTED, 2022-23 included -- per direction, the North
+  # and South Forks stay in for every year. That year's problem is its date
+  # window, handled below, not its water.
+  #
+  # Recorded because it settles a question the note above leaves open. The note
+  # rejects an MS + NF rule, correctly: it cannot be applied evenly, because
+  # 2023-24's section 5 is on both the North and South Forks. A MAINSTEM-ONLY
+  # rule has no such problem -- per the location lookup the mainstem shares no
+  # section with either fork in any year:
+  #
+  #   2022-23  MS 1,2,3   NF 4-7     SF 8-9
+  #   2023-24  MS 1,2     NF 3,4,5   SF 5
+  #   2024-25  MS 2,3     NF 4,5,6   SF 7
+  #   2025-26  MS 1,2     NF 3
+  #
+  # So `list(pattern = regex("Stillaguamish"), keep = "Stillaguamish - MS")`
+  # would hold all four years to the mainstem evenly, which is the scope that
+  # matches the proposed fishery (mainstem coho). That is the shape the
+  # fork-specific follow-up should take; it changes every Stillaguamish `b`, so
+  # it belongs to that decision rather than to this one.
 )
+
+# ------------------------------------------------------------------------------
+# Window restrictions -- WHICH DAYS a fishery-year's `b` is fit to
+# ------------------------------------------------------------------------------
+# Same idea as the section rules, on the other axis. The lookup window is what
+# the fishery was open for, which is not always what was surveyed: a long tail
+# of unsampled days still enters prep_days()'s day grid, and the BSS estimates
+# effort for them from the priors alone. Those days carry no index counts, so
+# they contribute nothing to `b` directly -- but they inflate the season totals
+# that `b` is then used to rescale.
+#
+# `trim_to_last_sampled` pulls the end back to the last day actually surveyed
+# within the window, so the end date is observed rather than chosen.
+#
+# One definition, three consumers: 01_fit_bss_bias.R (the `b` fit),
+# 10_render_fw_creel.R (the production render) and anything else that resolves a
+# window. Without this the b in the brief comes from one window and the season
+# totals from another.
+WINDOW_RESTRICTIONS <- list(
+  # Stillaguamish 2022-23 runs 2022-09-01 to 2022-11-30, 91 days -- the longest
+  # in the series, against 76 for 2024-25 and 61 for 2025-26 -- with a tail of
+  # late-season dates the other years do not have. Held to September, then
+  # trimmed to the last day sampled in the retained (mainstem) sections.
+  list(pattern = regex("^Stillaguamish salmon and gamefish 2022-23$"),
+       est_date_start = "2022-09-01",
+       est_date_end   = "2022-09-30",
+       trim_to_last_sampled = TRUE)
+)
+
+# Returns list(est_date_start, est_date_end, trim_to_last_sampled) or NULL.
+# First match wins; a second matching rule is an authoring error, not something
+# to silently compose, because two windows have no sensible intersection here.
+fishery_window_limit <- function(fishery_name) {
+  hits <- Filter(function(r) str_detect(fishery_name, r$pattern), WINDOW_RESTRICTIONS)
+  if (length(hits) == 0) return(NULL)
+  if (length(hits) > 1) {
+    cli::cli_abort(
+      "{.val {fishery_name}} matches {length(hits)} window restrictions -- \
+       make the patterns disjoint."
+    )
+  }
+  hits[[1]]
+}
+
+# ------------------------------------------------------------------------------
+# Catch groups a fishery-year should not be fitted for
+# ------------------------------------------------------------------------------
+# 00d's inventory already drops a group with zero fish, but it counts over the
+# fishery's FULL window. Narrow the window and a group that had fish can have
+# none left -- and fitting it is then a full MCMC run to learn that the
+# posterior is the prior truncated by having seen nothing.
+#
+# `b` is invariant to the catch group (the effort and catch sub-models share no
+# parameters), so excluding a group changes nothing about `b` -- only what catch
+# is reported alongside it.
+CATCH_GROUP_EXCLUSIONS <- list(
+  # No Chinook were caught in the September part of the Stillaguamish 2022-23
+  # fishery, which is all that survives the window restriction above.
+  list(pattern = regex("^Stillaguamish salmon and gamefish 2022-23$"),
+       groups = "chinook_all")
+)
+
+fishery_excluded_groups <- function(fishery_name) {
+  out <- character(0)
+  for (r in CATCH_GROUP_EXCLUSIONS) {
+    if (str_detect(fishery_name, r$pattern)) out <- union(out, r$groups)
+  }
+  out
+}
 
 # ------------------------------------------------------------------------------
 # RUN SCOPE -- fit `b` to part of a fishery rather than all of it

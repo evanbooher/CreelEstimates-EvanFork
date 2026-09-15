@@ -49,6 +49,12 @@ dir.create(REPORT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 source(here::here("analysis", "bss_bias", "catch_groups.R"))
 
+# Sections, window and excluded catch groups per fishery-year come from
+# scope_rules.R, the same file 01_fit_bss_bias.R reads. Duplicating any of them
+# here would let the `b` in the brief come from one scope and the season totals
+# from another, silently.
+source(here::here("analysis", "bss_bias", "scope_rules.R"))
+
 # The DEFAULT is the working set, not whatever was last debugged. A one-off
 # target belongs in the variable before sourcing, not here -- a narrow default
 # means a plain source() silently does less than it appears to.
@@ -117,31 +123,33 @@ BASE_PARAMS <- list(
 # Per-fishery overrides, keyed on exact fishery_name. Anything here wins over
 # BASE_PARAMS for that run only -- e.g. a fishery that needs a different
 # study_design or a pinned window.
+# Per-fishery overrides keyed on exact fishery_name, for anything NOT expressed
+# as a scope rule -- a different study_design, say. Scope (sections, window,
+# excluded groups) is resolved from scope_rules.R below and merged in per
+# fishery, so it does not have to be restated here.
 RUN_PARAM_OVERRIDES <- list(
-  # Stillaguamish 2022-23: mainstem sections only, and a window truncated before
-  # the late-November tail.
-  #
-  # SECTIONS -- this year carries sections beyond the mainstem that the rest of
-  # its series does not. A b series only means something if every year in it
-  # describes the same fishery, and this is also the source of that year's
-  # unmatched closure rows.
-  #
-  # DATES -- the lookup table gives 2022-09-01 to 2022-11-30 (91 days), the
-  # longest window in the series. Capped at the end of September and then
-  # trimmed by the render to the last date actually sampled within that cap, so
-  # the window ends on a surveyed day rather than on a chosen one.
-  #
-  # Both ends are pinned rather than just the end: resolve_dates() queries the
-  # database whenever EITHER is blank, so pinning both also makes this run
-  # reproducible without a connection.
-  "Stillaguamish salmon and gamefish 2022-23" = list(
-    section_filter       = c(1, 2, 3),
-    est_date_start       = "2022-09-01",
-    est_date_end         = "2022-09-30",
-    trim_to_last_sampled = TRUE
-  )
-  # "Stillaguamish salmon and gamefish 2025-26" = list(est_date_start = "2025-09-01")
+  # "Stillaguamish salmon and gamefish 2025-26" = list(study_design = "Standard")
 )
+
+# Scope params for one fishery-year, from scope_rules.R. Returns a list ready to
+# merge into the render params.
+scope_params_for <- function(fn) {
+  out <- list()
+
+  secs <- tryCatch(fishery_section_limit(fn), error = function(e) {
+    cli::cli_alert_danger("{fn}: section limit could not be resolved -- {conditionMessage(e)}")
+    NULL
+  })
+  if (!is.null(secs) && length(secs) > 0) out$section_filter <- as.numeric(secs)
+
+  win <- fishery_window_limit(fn)
+  if (!is.null(win)) {
+    out$est_date_start       <- win$est_date_start
+    out$est_date_end         <- win$est_date_end
+    out$trim_to_last_sampled <- isTRUE(win$trim_to_last_sampled)
+  }
+  out
+}
 
 # ------------------------------------------------------------------------------
 # Which fishery-years
@@ -184,14 +192,22 @@ if (is.null(inventory)) {
 }
 
 groups_for <- function(fn) {
-  if (is.null(inventory)) return(RENDER_GROUPS)
-  rows <- inventory |> filter(fishery_name == fn, catch_group %in% RENDER_GROUPS)
+  # Excluded first: the inventory counts over the fishery's FULL window, so a
+  # group can be non-empty there and empty inside a restricted window.
+  wanted <- setdiff(RENDER_GROUPS, fishery_excluded_groups(fn))
+  if (length(wanted) < length(RENDER_GROUPS)) {
+    cli::cli_alert_info(
+      "{fn}: excluding {.val {setdiff(RENDER_GROUPS, wanted)}} per scope_rules.R."
+    )
+  }
+  if (is.null(inventory)) return(wanted)
+  rows <- inventory |> filter(fishery_name == fn, catch_group %in% wanted)
   if (nrow(rows) == 0) {
     cli::cli_alert_warning("{fn}: not in the inventory -- fitting all groups.")
-    return(RENDER_GROUPS)
+    return(wanted)
   }
   keep <- rows |> filter(!is.na(n_fish), n_fish > 0) |> pull(catch_group)
-  intersect(RENDER_GROUPS, keep)
+  intersect(wanted, keep)
 }
 
 already_done <- function(fn) {
@@ -269,6 +285,26 @@ order_tbl |>
   filter(fishery_name %in% targets) |>
   select(fishery_name, n_interviews) |>
   print(n = Inf)
+
+# Scope, resolved from scope_rules.R, printed before anything runs. The Skagit
+# water-body rules apply to renders as well as to the `b` fits now -- which is
+# the point, since the brief pairs a b with season totals and they must describe
+# the same water -- so it should never be a surprise which sections a render used.
+if (length(targets) > 0) {
+  scope_echo <- map_dfr(targets, function(fn) {
+    sp <- scope_params_for(fn)
+    tibble(
+      fishery_name = fn,
+      sections = if (is.null(sp$section_filter)) "all" else paste(sp$section_filter, collapse = ", "),
+      window   = if (is.null(sp$est_date_start)) "lookup"
+                 else paste0(sp$est_date_start, " to ", sp$est_date_end,
+                             if (isTRUE(sp$trim_to_last_sampled)) " (trim)" else ""),
+      groups   = paste(group_plan[[fn]], collapse = ", ")
+    )
+  })
+  cli::cli_alert_info("Scope per fishery-year (scope_rules.R):")
+  print(scope_echo, n = Inf)
+}
 if (length(skipped) > 0) {
   cli::cli_alert_info("Skipping {length(skipped)} already carrying estimates_bss.rds (RENDER_SKIP_DONE):")
   print(skipped)
@@ -325,6 +361,7 @@ if (length(targets) > 0) {
     # single-group fishery, which is exactly the mismatch ("dims declared=785,
     # dims found=1788") that killed Stillaguamish 2025-26's coho_harvest fit.
     p <- utils::modifyList(BASE_PARAMS, list(fishery_name = fn))
+    p <- utils::modifyList(p, scope_params_for(fn))
     p$est_catch_groups <- catch_groups_df(grps)
     cli::cli_alert_info("Catch group{?s} for this render: {.val {grps}}")
     if (!is.null(RUN_PARAM_OVERRIDES[[fn]])) {

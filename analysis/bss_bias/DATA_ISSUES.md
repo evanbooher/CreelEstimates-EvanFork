@@ -234,14 +234,21 @@ It also runs the longest window in the series -- 2022-09-01 to 2022-11-30, 91
 days, against 76 for 2024-25 and 61 for 2025-26 -- with a sparse tail of late
 November dates that the other years do not have.
 
-**Handled here:** `10_render_fw_creel.R` sets
-`section_filter = c(1, 2, 3)`, caps the window at 2022-09-30, and sets
-`trim_to_last_sampled = TRUE` for that fishery-year via `RUN_PARAM_OVERRIDES`.
-`fw_creel.Rmd` applies the section filter to every `dwg` table carrying
-`section_num`, after `dwg_raw.rds` is written and before `prep_days()` builds the
-day grid, and reports the row counts dropped per table. The trim then pulls
-`est_date_end` back to the last date actually sampled in the retained sections,
-so the window ends on a surveyed day rather than a chosen one.
+**Handled here:** a window restriction in `scope_rules.R` holds that
+fishery-year to 2022-09-01 / 2022-09-30 with `trim_to_last_sampled = TRUE`, and
+a catch-group exclusion drops `chinook_all` (no Chinook were caught in the
+September part of the fishery). One definition, read by both
+`01_fit_bss_bias.R` (the `b` fit) and `10_render_fw_creel.R` (the production
+render) — without that, the `b` in the brief would come from one window and the
+season totals from another.
+
+**Its sections are NOT restricted.** Per direction the North and South Forks
+stay in for every Stillaguamish year; the problem with 2022-23 is its window,
+not its water. The section-restriction mechanism exists and `scope_rules.R`
+records that a mainstem-only rule *could* be applied evenly across all four
+years (the mainstem shares no section with either fork in any year), which the
+rejected MS + NF rule could not — but that changes every Stillaguamish `b` and
+belongs to the fork-specific follow-up.
 
 Trailing unsampled days are not harmless: `prep_days()` puts every one of them in
 the day grid, and the BSS estimates effort and catch for days nobody visited on
