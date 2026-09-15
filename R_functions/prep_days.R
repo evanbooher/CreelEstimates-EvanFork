@@ -178,46 +178,46 @@ prep_days <- function(
     dplyr::select(section_num, event_date) |>
     dplyr::mutate(open = FALSE)
 
-  # rows_update() ERRORS on any closure whose (section, date) is not already in
-  # the grid, which took down Stillaguamish 2022-23 with "`y` must contain keys
-  # that already exist in `x`" and no indication of which keys or why.
+  # rows_update()'s default unmatched = "error" aborts on any closure whose
+  # (section, date) is not already in the grid. That took down Stillaguamish
+  # 2022-23 with "`y` must contain keys that already exist in `x`" and a list of
+  # row indices -- no section, no date, no reason.
   #
-  # Two very different things produce an unmatched closure, and they must not be
-  # treated alike:
+  # Ignoring them is correct. `sections` is the set of section numbers that
+  # actually carry interviews this fishery-year, so an unmatched closure means
+  # one of two harmless things: the closure falls outside the days being
+  # estimated (closure tables are kept by calendar year), or it names a section
+  # this year never sampled -- which has no column here and no estimation
+  # downstream either way.
   #
-  #   * A date the fishery is not being estimated over. Harmless -- a closure
-  #     outside the window is simply irrelevant -- and expected wherever the
-  #     closure table is maintained by calendar year.
-  #   * A SECTION NUMBER that is not in `sections`. That is a numbering
-  #     mismatch, and dropping it silently would leave a closed section looking
-  #     open for the whole season. Loud.
+  # Counted rather than silent, because the same signature would appear if
+  # section NUMBERING disagreed between the closure table and the interviews.
+  # A count of zero matched closures against a non-empty closure table is worth
+  # a second look; a handful is routine.
   unmatched <- dplyr::anti_join(closure_rows, open_grid,
                                 by = c("section_num", "event_date"))
   if (nrow(unmatched) > 0) {
-    bad_sections <- sort(setdiff(unique(unmatched$section_num), sections))
-    if (length(bad_sections) > 0) {
-      cli::cli_alert_danger(
-        "prep_days: {nrow(unmatched)} closure row{?s} name section{?s} \
-         {.val {bad_sections}}, which {?is/are} not among the sections being \
-         estimated ({.val {sections}}). Those closures are DROPPED, so those \
-         sections will be treated as open all season. Check the section \
-         numbering in the closure table against the fishery's sections."
-      )
-    }
-    n_date_only <- nrow(dplyr::filter(unmatched, section_num %in% sections))
-    if (n_date_only > 0) {
-      cli::cli_alert_info(
-        "prep_days: {n_date_only} closure row{?s} fall on date{?s} outside the \
-         days being estimated -- ignored."
-      )
-    }
-    closure_rows <- dplyr::semi_join(closure_rows, open_grid,
-                                     by = c("section_num", "event_date"))
+    # No {?} pluralization markers below: the message carries two quantities and
+    # cli aborts with "Multiple quantities for pluralization" when it cannot tell
+    # which one governs. A diagnostic must not be able to fail the run.
+    n_ignored   <- nrow(unmatched)
+    n_closures  <- nrow(closure_rows)
+    off_section <- sort(setdiff(unique(unmatched$section_num), sections))
+    off_txt     <- if (length(off_section) == 0) "none" else paste(off_section, collapse = ", ")
+    cli::cli_alert_info(
+      "prep_days: ignoring {n_ignored} of {n_closures} closure rows -- either \
+       outside the days being estimated, or on a section with no interviews \
+       this fishery-year. Unmatched sections: {off_txt}. Sections sampled: \
+       {paste(sections, collapse = ', ')}."
+    )
   }
 
   days <- left_join(
     days,
     dplyr::rows_update(
+      open_grid, closure_rows,
+      by = c("section_num", "event_date"),
+      unmatched = "ignore"
       ) |> 
       dplyr::arrange(section_num, event_date) |> 
       dplyr::mutate(section_num = paste0("open_section_", section_num)) |> 

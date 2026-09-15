@@ -19,7 +19,8 @@
 #   source("analysis/bss_bias/10_render_fw_creel.R")
 #
 #   Override before sourcing:
-#     RENDER_FISHERY_RE <- "^Stillaguamish salmon and gamefish 2022-23$" # regex over fishery_name
+#     RENDER_FISHERY_RE <- "^Stillaguamish salmon and gamefish 2022-23$"  # one fishery-year
+#     RENDER_FISHERY_RE <- "Stillaguamish"                                # a whole basin
 #     RENDER_GROUPS     <- c("chinook_all", "coho_harvest")
 #     RENDER_PROJECT    <- "bss_bias"
 #     RENDER_SKIP_DONE  <- TRUE     # skip fishery-years that already have output
@@ -48,7 +49,10 @@ dir.create(REPORT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 source(here::here("analysis", "bss_bias", "catch_groups.R"))
 
-if (!exists("RENDER_FISHERY_RE", inherits = FALSE)) RENDER_FISHERY_RE <- "^Stillaguamish salmon and gamefish 2022-23$"
+# The DEFAULT is the working set, not whatever was last debugged. A one-off
+# target belongs in the variable before sourcing, not here -- a narrow default
+# means a plain source() silently does less than it appears to.
+if (!exists("RENDER_FISHERY_RE", inherits = FALSE)) RENDER_FISHERY_RE <- "Snohomish|Stillaguamish"
 if (!exists("RENDER_GROUPS",     inherits = FALSE)) RENDER_GROUPS     <- names(CATCH_GROUPS)
 if (!exists("RENDER_PROJECT",    inherits = FALSE)) RENDER_PROJECT    <- "bss_bias"
 if (!exists("RENDER_SKIP_DONE",  inherits = FALSE)) RENDER_SKIP_DONE  <- TRUE

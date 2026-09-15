@@ -313,7 +313,14 @@ dwg$days <- prep_days(
   # the WHOLE fishery-year rather than just the affected section. Union with
   # effort's sections here so the grid already spans everywhere effort was
   # counted, not just everywhere someone was interviewed.
-  sections = sort(unique(c(dwg$interview$section_num, dwg$effort$section_num))),
+  # as.numeric(as.character()): section_num arrives as character from some
+  # fisheries (see DATA_ISSUES.md), and c() would then coerce the whole union
+  # to character. prep_days() matches closures with as.double(section_num), so
+  # a character grid silently matches NOTHING -- every section open all season,
+  # no error.
+  sections = sort(unique(as.numeric(as.character(
+    c(dwg$interview$section_num, dwg$effort$section_num)
+  )))),
   closures = dwg$closures,
   day_length = params$day_length_expansion,
   day_length_inputs = day_length_inputs
