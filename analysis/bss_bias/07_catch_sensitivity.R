@@ -201,22 +201,64 @@ if (is.null(catch_base)) {
 # distinction matters most for exactly the impact-limited groups where a zero
 # is the finding. Carried over from 00d's inventory with catch = 0.
 inv_path <- file.path(OUT_DIR, "bss_catch_inventory.csv")
-if (file.exists(inv_path) && !is.null(catch_base)) {
-  zero_rows <- read_csv(inv_path, show_col_types = FALSE) |>
-    filter(!is.na(catch_group), !is.na(n_records), n_records == 0) |>
-    transmute(fishery_name, est_cg, C_sum_median = 0,
-              baseline_source = "zero encounters (no records)")
-  if (nrow(zero_rows) > 0) {
+if (!is.null(catch_base)) {
+  catch_base <- mutate(catch_base, baseline_source = "fitted")
+
+  # --- A fitted value for a group with no fish is not an estimate ------------
+  #
+  # A zero-record group still produces a C_sum, because the effort side of the
+  # model runs regardless and the catch rate falls back on its prior. Those
+  # numbers are large, plausible-looking and completely wrong: a run that
+  # fitted Chinook for Stillaguamish 2025-26 -- zero encounters in the
+  # interviews -- returned 1,015 fish, and it reached a shareable table.
+  #
+  # The inventory knows which groups have records, so a zero there OVERRIDES a
+  # fitted value rather than merely filling a gap. Overriding, not filling, is
+  # the whole point: the bad rows exist, so declining to add a duplicate does
+  # nothing.
+  if (file.exists(inv_path)) {
+    inv <- read_csv(inv_path, show_col_types = FALSE) |>
+      filter(!is.na(catch_group), !is.na(n_records))
+    zero_keys <- inv |> filter(n_records == 0) |> select(fishery_name, est_cg)
+
+    overridden <- semi_join(catch_base, zero_keys, by = c("fishery_name", "est_cg"))
+    if (nrow(overridden) > 0) {
+      cli::cli_alert_warning(
+        "Overriding {nrow(overridden)} fitted baseline{?s} for catch groups with ZERO records \\
+         -- those are prior-driven, not estimates:"
+      )
+      overridden |> select(fishery_name, est_cg, C_sum_median) |> print(n = Inf)
+    }
+
     catch_base <- catch_base |>
-      mutate(baseline_source = "fitted") |>
-      bind_rows(anti_join(zero_rows, catch_base, by = c("fishery_name", "est_cg")))
-    cli::cli_alert_info(
-      "Carried {nrow(zero_rows)} zero-encounter fishery-year x group combination{?s} \\
-       from the inventory as catch = 0, so they read as examined rather than missing."
+      anti_join(zero_keys, by = c("fishery_name", "est_cg")) |>
+      bind_rows(zero_keys |> mutate(C_sum_median = 0,
+                                    baseline_source = "zero encounters (no records)"))
+  } else {
+    cli::cli_alert_warning(
+      "No {.file bss_catch_inventory.csv} -- cannot check whether a fitted baseline had any \\
+       fish behind it. Run {.file 00d_catch_inventory.R}."
     )
   }
-} else if (!is.null(catch_base)) {
-  catch_base <- mutate(catch_base, baseline_source = "fitted")
+
+  # --- An unconverged C_sum is not an estimate either ------------------------
+  if ("C_sum_rhat" %in% names(catch_base)) {
+    bad <- catch_base |> filter(!is.na(C_sum_rhat), C_sum_rhat > 1.05)
+    if (nrow(bad) > 0) {
+      cli::cli_alert_warning(
+        "Dropping {nrow(bad)} baseline{?s} with C_sum Rhat > 1.05 -- the chains did not mix, \\
+         so the median is not an estimate of anything:"
+      )
+      bad |> select(fishery_name, est_cg, C_sum_median, C_sum_rhat) |> print(n = Inf)
+      catch_base <- filter(catch_base, is.na(C_sum_rhat) | C_sum_rhat <= 1.05)
+    }
+  } else {
+    cli::cli_alert_warning(
+      "Baseline has no {.field C_sum_rhat} column -- convergence cannot be checked. A file \\
+       written by 01b_fit_catch_groups.R predates that column; prefer \\
+       {.file 09_read_production_estimates.R}."
+    )
+  }
 }
 
 dat <- b_summary |>
