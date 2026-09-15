@@ -329,7 +329,7 @@ T4 <- dims |>
     pass_through_class = case_when(
       has_census                      ~ "damped (census anchors effort)",
       has_angler_index                ~ "near-full (angler counts resist weakly via p_I)",
-      n_b_channels >= 1               ~ "full (-1): b and effort perfectly confounded",
+      n_b_channels >= 1               ~ "full one-for-one: b and effort perfectly confounded",
       TRUE                            ~ "no index channel -- check inputs"
     ),
     # The scenario actually proposed for this year: no census collected. Under
@@ -337,7 +337,7 @@ T4 <- dims |>
     # is whether every live b-channel gets an imported value.
     census_free_pass_through = case_when(
       has_angler_index  ~ "near-full",
-      n_b_channels >= 1 ~ "full (-1)",
+      n_b_channels >= 1 ~ "full one-for-one",
       TRUE              ~ "undefined"
     )
   ) |>
