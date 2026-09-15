@@ -16,17 +16,18 @@ execute:
 
 ```{r setup}
 # ==============================================================================
-# PART 1 -- the mechanism and the reliability of a borrowed b.
+# ONE DOCUMENT THAT GROWS WITH THE OUTPUTS.
 #
-# DELIBERATELY SELF-CONTAINED ON THE b DRAWS. This document reads T7 and the T6
-# calibration only, and touches NO season totals: not bss_catch_baseline.csv,
-# not catch_estimate, not the gear split. Everything here comes from the b
-# posteriors and the meta-analysis, both of which are complete.
+# Everything down to "How close a borrowed b gets" rests on the b draws and the
+# meta-analysis alone -- T7's pct_change_catch and the T6 calibration. Neither
+# reads a season total, so that material renders the moment 07 has run and is
+# sendable while a model sweep is still going.
 #
-# That is the point of the split. Part 1 can be sent without waiting on a model
-# sweep, and a stale or half-finished baseline sitting in outputs/ cannot leak
-# into it. Season totals in fish, and the bank/boat split, are part 2
-# (12_estimates_update.qmd) -- the complementary update, not a correction.
+# The effort-and-catch section at the end needs the production fits. It renders
+# only when bss_b_T8_gear_split.csv exists AND T7 carries season totals, and is
+# replaced by a short "what is coming" note otherwise. Gating on the data rather
+# than maintaining a second document means the two halves cannot drift apart,
+# and nothing above can be affected by a baseline that is missing or stale.
 # ==============================================================================
 library(tidyverse)
 library(gt)
@@ -63,7 +64,8 @@ FOCUS_RE <- params$focus
 #
 # pct_change_catch, NOT pct_change_catch_total: the first is 100*(b_fitted/b_alt - 1),
 # which needs no season total. The second divides by C_sum and is NA until the
-# fits land -- it belongs to part 2.
+# fits land, so it belongs to the in-fish section at the end -- this table has
+# to render either way.
 #
 # Pivot on a short stable key rather than the display label, so rewording a
 # label for the reader does not move a column name.
@@ -100,6 +102,69 @@ SERIES_LABEL <- {
   ft <- sort(unique(wide$fishery_type))
   if (length(ft) == 1) ft else paste(ft, collapse = " / ")
 }
+
+# ------------------------------------------------------------------------------
+# Season totals, if the production fits have landed
+# ------------------------------------------------------------------------------
+
+# est_cg is the full species_lifestage_finmark_fate string. Collaborators do not
+# need to read a regex, so it is labelled by target species.
+group_label <- function(x) {
+  dplyr::case_when(
+    stringr::str_starts(x, "Chinook") ~ "Chinook encounters",
+    stringr::str_starts(x, "Coho")    ~ "Coho harvest",
+    is.na(x)                          ~ NA_character_,
+    TRUE                              ~ stringr::str_extract(x, "^[^_]+")
+  )
+}
+
+t8_path <- file.path(OUT_DIR, "bss_b_T8_gear_split.csv")
+T8 <- if (file.exists(t8_path)) readr::read_csv(t8_path, show_col_types = FALSE) else NULL
+
+# At the anchor tier b_alt == b_fitted, so both gear factors are 1 and the row
+# is the fit's own season total. Either bias_type gives the same numbers there.
+as_fitted <- if (is.null(T8)) NULL else T8 |>
+  filter(tier_kind == "anchor", bias_type == "vehicle",
+         str_detect(fishery_type, FOCUS_RE)) |>
+  mutate(group = group_label(est_cg),
+         boat_share_catch = catch_boat / catch_total) |>
+  arrange(fishery_name, group)
+
+# The same sensitivity as the table above, but in fish. pct_change_catch_total
+# here, NOT pct_change_catch: the first is measured against the whole season
+# total and is what a reader quotes; they differ for trailer, where only the
+# boat component moves.
+fish <- T7 |>
+  filter(tier_kind %in% c("anchor", "empirical"),
+         str_detect(fishery_type, FOCUS_RE)) |>
+  mutate(group = group_label(est_cg),
+         key = case_when(
+           tier_kind == "anchor"         ~ "fitted",
+           str_detect(tier, "^low end")  ~ "low",
+           str_detect(tier, "^high end") ~ "high",
+           TRUE                          ~ NA_character_
+         )) |>
+  filter(!is.na(key)) |>
+  select(fishery_type, fishery_name, year_start, bias_type, group, key,
+         catch_estimate, pct_change_catch_total) |>
+  pivot_wider(names_from = key,
+              values_from = c(catch_estimate, pct_change_catch_total)) |>
+  transmute(
+    fishery_type, fishery_name, year_start, bias_type, group,
+    fitted    = catch_estimate_fitted,
+    if_b_low  = catch_estimate_low,
+    if_b_high = catch_estimate_high,
+    pct_low   = pct_change_catch_total_low,
+    pct_high  = pct_change_catch_total_high
+  ) |>
+  filter(!is.na(fitted)) |>
+  arrange(fishery_type, year_start, group, bias_type)
+
+# Both conditions, not either: the gear split without season totals gives a
+# table of NAs, and season totals without the gear split would report the
+# trailer term as if it moved the whole fishery -- which is what produced the
+# -58% / +260% rows before the gear totals existed.
+HAVE_FISH <- !is.null(as_fitted) && nrow(as_fitted) > 0 && nrow(fish) > 0
 
 ```
 
@@ -257,10 +322,148 @@ if (nrow(fv) > 0 && nrow(ft) > 0) cat(sprintf(
 ))
 ```
 
+```{r follow-up, eval = !HAVE_FISH, results = "asis"}
+# Their words, unchanged, for the version that goes out before the fits land.
+cat(r"---(
 ## Follow up
 
 Season total catch estimates by bank and boat gear strata, are being fitted
 overnight. These updated results will put the effect in
 fish, and will also help illustrate the magnitude of bank/boat angling effort and contextualize
 their respective b terms.
+)---")
+```
+
+```{r gear-intro, eval = HAVE_FISH, results = "asis"}
+# Headings and prose have to be conditional too, so they go through cat() in an
+# asis chunk. r"---( )---" is a raw string: no backslash escaping, which matters
+# for the LaTeX below.
+cat(r"---(
+## Estimated effort and catch by gear
+
+The percentages above hold for every species and catch group. Below they are
+put in fish, using the fitted season totals, and split between bank and boat.
+
+The vehicle index counts vehicles, which every angler arrives in, so `b[1]`
+rescales the **whole fishery**. The trailer index counts boat trailers, and
+trailers per bank angler come out at essentially zero in the interviews, so the
+trailer count observes **boat anglers alone**. The boat share below is therefore
+what sets how much of the fishery the trailer term can move at all: where a
+fishery is mostly fished from the bank, getting that term wrong costs
+correspondingly little.
+)---")
+```
+
+```{r fitted-totals, eval = HAVE_FISH}
+as_fitted |>
+  select(fishery_name, group, catch_bank, catch_boat, catch_total,
+         effort_bank, effort_boat, boat_share_catch) |>
+  gt(groupname_col = "fishery_name") |>
+  cols_label(group = "Catch group",
+             catch_bank = "Bank", catch_boat = "Boat", catch_total = "Total",
+             effort_bank = "Bank", effort_boat = "Boat",
+             boat_share_catch = "Boat share") |>
+  tab_spanner("Catch (fish)", c(catch_bank, catch_boat, catch_total)) |>
+  tab_spanner("Effort (angler-hours)", c(effort_bank, effort_boat)) |>
+  fmt_number(c(catch_bank, catch_boat, catch_total), decimals = 0) |>
+  fmt_number(c(effort_bank, effort_boat), decimals = 0) |>
+  fmt_percent(boat_share_catch, decimals = 0) |>
+  sub_missing(everything(), missing_text = "--") |>
+  cols_align("right", c(catch_bank, catch_boat, catch_total,
+                        effort_bank, effort_boat, boat_share_catch)) |>
+  tab_options(table.font.size = 13, data_row.padding = px(4),
+              row_group.font.weight = "bold") |>
+  tab_source_note(
+    paste0("Posterior medians. Gear totals are the model's own -- the daily, ",
+           "section-level draws summed within gear, not a share applied afterwards.")
+  )
+```
+
+```{r gear-math, eval = HAVE_FISH, results = "asis"}
+cat(r"---(
+::: {.callout-note collapse="true"}
+## How the two terms divide the fishery between them
+
+The two counts are satisfied at the same time, with trailers per bank angler at
+essentially zero:
+
+$$
+egin{aligned}
+\lambda_{	ext{bank}} R_{V1} + \lambda_{	ext{boat}} R_{V2} &= V_I / b_1\
+\lambda_{	ext{bank}} R_{T1} + \lambda_{	ext{boat}} R_{T2} &= T_I / b_2
+\end{aligned}
+$$
+
+Writing $k_1 = b_1^{	ext{fitted}}/b_1$ and $k_2 = b_2^{	ext{fitted}}/b_2$, the
+trailer equation pins boat effort and the vehicle equation then determines bank:
+
+$$
+rac{\lambda_{	ext{boat}}}{\lambda_{	ext{boat}}^{0}} = k_2,
+\qquad
+rac{\lambda_{	ext{bank}}}{\lambda_{	ext{bank}}^{0}} = k_1(1+ho) - ho\, k_2
+$$
+
+where $ho = (R_{V2}/R_{V1})\cdot(\lambda_{	ext{boat}}^{0}/\lambda_{	ext{bank}}^{0})$
+is the boat-to-bank ratio of the vehicle count.
+
+Two things follow that the simpler treatment misses. Moving $b_1$ alone does
+**not** cleanly rescale the whole fishery, because boat effort is held in place
+by the trailer counts, so the entire adjustment lands on bank. And moving $b_2$
+alone does **not** leave bank untouched, because lowering boat effort frees
+vehicle count to be attributed to bank, which pushes bank the other way. The two
+partly offset each other.
+
+Catch follows effort within each gear, since the catch rate is gear-specific and
+carries no $b$.
+:::
+
+### The same range of `b`, in fish
+)---")
+```
+
+```{r fish-table, eval = HAVE_FISH}
+fish |>
+  mutate(range = sprintf("%+.0f%% / %+.0f%%", pct_high, pct_low),
+         yr = as.character(year_start)) |>
+  select(fishery_type, yr, group, bias_type, fitted, if_b_low, if_b_high, range) |>
+  gt(groupname_col = "fishery_type") |>
+  cols_label(yr = "Year", group = "Catch group", bias_type = "b term",
+             fitted = "As fitted",
+             if_b_low = "If b is at the low end",
+             if_b_high = "If b is at the high end",
+             range = "Change") |>
+  fmt_number(c(fitted, if_b_low, if_b_high), decimals = 0) |>
+  cols_align("right", c(fitted, if_b_low, if_b_high, range)) |>
+  sub_missing(everything(), missing_text = "--") |>
+  tab_options(table.font.size = 13, data_row.padding = px(4),
+              row_group.font.weight = "bold") |>
+  tab_source_note(
+    paste0("Fish. Vehicle rows move the whole season total; trailer rows move ",
+           "the boat-caught portion only, which is why their percent change is ",
+           "the smaller of the two wherever the fishery is mostly bank.")
+  )
+```
+
+```{r fish-figure, eval = HAVE_FISH, fig.width = 9, fig.height = 6}
+fish |>
+  ggplot(aes(y = fct_rev(factor(fishery_name)), color = bias_type)) +
+  geom_linerange(aes(xmin = if_b_high, xmax = if_b_low),
+                 position = position_dodge(width = 0.55), linewidth = 2.2, alpha = 0.9) +
+  geom_point(aes(x = fitted), position = position_dodge(width = 0.55),
+             size = 2.6, color = SURFACE) +
+  geom_point(aes(x = fitted), position = position_dodge(width = 0.55), size = 1.8) +
+  facet_wrap(~group, scales = "free_x") +
+  scale_x_continuous(labels = scales::comma) +
+  scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]),
+                     name = NULL) +
+  labs(title = "Estimated catch under the plausible range of b", x = "Fish", y = NULL) +
+  theme_bss()
+```
+
+```{r fish-figure-note, eval = HAVE_FISH, results = "asis"}
+cat(r"---(
+The point is the estimate as fitted; the bar spans what it would be at the two
+ends of the plausible range for `b`.
+)---")
+```
 

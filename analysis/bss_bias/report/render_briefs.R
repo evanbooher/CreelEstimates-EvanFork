@@ -1,14 +1,15 @@
 # ==============================================================================
-# render_briefs.R -- one per-basin collaborator packet, rendered from one source
+# render_briefs.R -- one per-basin collaborator brief, rendered from one source
 #
-# Part 1 (11_share_brief.qmd) and part 2 (12_estimates_update.qmd) are the same
-# document for every basin; only the `focus` param changes. Rendering them from
-# a loop rather than by hand is what keeps the Stillaguamish and Snohomish
-# copies from quietly drifting apart as the text is edited.
+# 11_share_brief.qmd is the same document for every basin; only the `focus`
+# param changes. Rendering from a loop rather than by hand is what keeps the
+# Stillaguamish and Snohomish copies from quietly drifting apart as the text is
+# edited.
 #
-# Part 1 needs only 07_catch_sensitivity.R to have run. Part 2 additionally
-# needs the production fits (09_read_production_estimates.R, then 07 again), so
-# it is skipped -- not failed -- while the sweep is still going.
+# The brief needs 07_catch_sensitivity.R to have run. It GROWS an effort-and-
+# catch section once the production fits exist (09_read_production_estimates.R,
+# then 07 again) -- the document gates on the data itself, so this script does
+# not have to know or care which version it is producing.
 #
 #   Rscript analysis/bss_bias/report/render_briefs.R
 #
@@ -52,18 +53,23 @@ if (!nzchar(quarto_bin)) {
              {.code quarto render 11_share_brief.qmd -P focus:Stillaguamish}")
 }
 
-have_part2 <- file.exists(file.path(OUT_DIR, "bss_b_T8_gear_split.csv"))
-if (!have_part2) {
+# Reported, not acted on: the document decides for itself. This line just says
+# which of the two versions is about to come out, so a brief that quietly lacks
+# the fish section is not a surprise.
+if (file.exists(file.path(OUT_DIR, "bss_b_T8_gear_split.csv"))) {
+  cli_alert_info("Gear split found -- briefs will include effort and catch in fish.")
+} else {
   cli_alert_info(
-    "No {.file bss_b_T8_gear_split.csv} -- rendering part 1 only. Part 2 needs the \\
-     production fits: run {.file 09_read_production_estimates.R}, then \\
-     {.file 07_catch_sensitivity.R}, then re-run this."
+    "No {.file bss_b_T8_gear_split.csv} -- briefs will end at the percentages, with \\
+     the follow-up note. For the in-fish section run \\
+     {.file 09_read_production_estimates.R}, then {.file 07_catch_sensitivity.R}, \\
+     then re-run this."
   )
 }
 
 jobs <- expand.grid(
   focus = BRIEF_FOCI,
-  qmd   = c("11_share_brief.qmd", if (have_part2) "12_estimates_update.qmd"),
+  qmd   = "11_share_brief.qmd",
   stringsAsFactors = FALSE
 )
 

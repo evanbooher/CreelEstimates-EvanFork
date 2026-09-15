@@ -219,47 +219,47 @@ affects the creel estimates themselves and not just this work.
    `source("analysis/bss_bias/01b_fit_catch_groups.R")`. Narrow it first with
    `GROUP_KEY` / `FISHERY_RE` / `YEARS_MODE` if wanted.
 
-## The two-part collaborator brief
+## The collaborator brief
 
-`report/` carries two short, self-contained HTML documents for external
-collaborators. They are **deliberately split by what they depend on**, so the
-first can be sent without waiting on a model sweep.
+`report/11_share_brief.qmd` is a short, self-contained HTML brief for external
+collaborators. **It grows with the outputs rather than existing in two
+versions.**
 
-| | Depends on | Contains |
-|---|---|---|
-| `11_share_brief.qmd` -- part 1 | `b` draws + the meta-analysis only | The 1/`b` mechanism with its derivation, the leave-one-out reliability of a borrowed `b`, and the **percent** change in estimated catch across each series' plausible range |
-| `12_estimates_update.qmd` -- part 2 | the above **plus** fitted season totals | The same result **in fish**, season totals and effort by bank/boat, and the two-channel arithmetic for why the two `b` terms reach different parts of the fishery |
+| Section | Depends on |
+|---|---|
+| The 1/`b` mechanism with its derivation, the percent change in estimated catch across each series' plausible range, and the leave-one-out reliability of a borrowed `b` | the `b` draws + the meta-analysis (i.e. `07` alone) |
+| Estimated effort and catch by bank/boat, the same range in fish, and the two-channel arithmetic for why the two `b` terms reach different parts of the fishery | the above **plus** fitted season totals |
 
-Part 1 never reads `bss_catch_baseline.csv`. That is the point: a stale or
-half-finished baseline sitting in `outputs/` cannot leak into it, and the
-percentages it reports are identical for every species and catch group anyway,
-because `b` moves effort and leaves the catch rate alone.
+Everything in the first row renders as soon as `07_catch_sensitivity.R` has run,
+so the brief is sendable while a model sweep is still going. The second row
+renders only when `bss_b_T8_gear_split.csv` exists **and** T7 carries season
+totals; otherwise a short follow-up note takes its place. Both conditions, not
+either: the gear split without season totals is a table of NAs, and season
+totals without the gear split report the trailer term as if it moved the whole
+fishery.
 
-Part 2 is the **complement, not a correction** -- nothing in part 1 changes when
-the fits land. It `stop()`s loudly rather than rendering against an absent or
-all-`NA` baseline.
+Gating on the data means nothing above can be affected by a baseline that is
+missing or stale, and there is no second document to drift out of sync.
 
-Both are **rendered once per basin** from a single source, so the copies cannot
-drift apart as the text is edited. `focus` is matched against `fishery_type`,
-so a basin name is enough; the document derives its own display label from the
-rows it kept.
+Briefs are **rendered once per basin** from that single source. `focus` is
+matched against `fishery_type`, so a basin name is enough; the document derives
+its own display label from the rows it kept.
 
 ```
-# part 1 -- sendable as soon as 07 has run
+# as soon as 07 has run -- percentages, sendable immediately
 Rscript analysis/bss_bias/07_catch_sensitivity.R
 Rscript analysis/bss_bias/report/render_briefs.R
 
-# part 2 -- after the production fits exist; the same driver picks it up
+# after the production fits exist -- same command, now with fish and gear
 Rscript analysis/bss_bias/09_read_production_estimates.R
 Rscript analysis/bss_bias/07_catch_sensitivity.R
 Rscript analysis/bss_bias/report/render_briefs.R
 ```
 
 `render_briefs.R` defaults to `BRIEF_FOCI <- c("Stillaguamish", "Snohomish")`
-and writes `11_share_brief_stillaguamish.html`,
-`11_share_brief_snohomish.html`, and the matching part 2 files. It renders part
-1 only, with a note, while `bss_b_T8_gear_split.csv` is absent. To do one by
-hand:
+and writes `11_share_brief_stillaguamish.html` and
+`11_share_brief_snohomish.html`. It prints which of the two versions is coming
+out. To do one by hand:
 
 ```
 quarto render analysis/bss_bias/report/11_share_brief.qmd -P focus:Skagit
