@@ -180,6 +180,13 @@ read_one <- function(row) {
          labelled, the rest are dropped."
       )
     }
+    # R_V / R_T by gear. R_V carries the gear weights that decide how a change
+    # in b[1] is apportioned between bank and boat; R_T[bank] is the assumption
+    # the whole gear split rests on (trailers per bank angler ~ 0) and is
+    # recorded so it can be checked rather than believed.
+    rv <- draws$R_V; rt <- draws$R_T
+    rvg <- function(m, g) if (!is.null(m) && is.matrix(m) && ncol(m) >= g) stats::median(m[, g], na.rm = TRUE) else NA_real_
+
     gv <- function(m, g) if (!is.null(m) && ncol(m) >= g) summarise_vec(m[, g]) else summarise_vec(NA_real_)
     c_bank <- gv(cg, 1); c_boat <- gv(cg, 2)
     e_bank <- gv(eg, 1); e_boat <- gv(eg, 2)
@@ -228,6 +235,13 @@ read_one <- function(row) {
       C_sum_boat_q2.5 = c_boat$q2.5, C_sum_boat_q97.5 = c_boat$q97.5,
       boat_share_catch  = c_boat$median / (c_bank$median + c_boat$median),
       boat_share_effort = e_boat$median / (e_bank$median + e_boat$median),
+      R_V_bank = rvg(rv, 1), R_V_boat = rvg(rv, 2),
+      R_T_bank = rvg(rt, 1), R_T_boat = rvg(rt, 2),
+      # rho: the boat-to-bank ratio of the VEHICLE count. It is what decides
+      # how a change in b[1] is shared between the two gear types, and how far
+      # bank effort moves when b[2] alone changes. L[d] is common to both gear
+      # types, so E_boat/E_bank is the same ratio as lambda_boat/lambda_bank.
+      rho = (rvg(rv, 2) / rvg(rv, 1)) * (e_boat$median / e_bank$median),
       n_gear = n_gear,
       n_draws = cs$n_draws,
       C_sum_rhat = rhat_of(e$summary, "C_sum"),
@@ -288,8 +302,8 @@ cli::cli_h2("Season totals")
 baseline |>
   mutate(group = str_extract(est_cg, "^[^_]+")) |>
   select(fishery_name, group, C_sum_median, C_sum_bank_median, C_sum_boat_median,
-         boat_share_catch, E_sum_median, obs_fish, obs_cpue, model_cpue,
-         C_sum_rhat, n_draws) |>
+         boat_share_catch, E_sum_median, R_T_bank, rho,
+         obs_fish, obs_cpue, model_cpue, C_sum_rhat, n_draws) |>
   arrange(fishery_name, group) |>
   print(n = Inf)
 
@@ -314,6 +328,16 @@ if (nrow(cpue_off) > 0) {
     mutate(ratio = model_cpue / obs_cpue) |>
     select(fishery_name, est_cg, obs_cpue, model_cpue, ratio) |>
     print(n = Inf)
+}
+
+bad_rt <- baseline |> filter(!is.na(R_T_bank), R_T_bank > 0.05)
+if (nrow(bad_rt) > 0) {
+  cli::cli_h2("R_T for BANK anglers is not ~0")
+  cli::cli_alert_warning(
+    "The gear-split arithmetic assumes bank anglers tow no trailers, so the trailer index \\
+     observes boat effort alone. These fishery-years contradict that:"
+  )
+  bad_rt |> select(fishery_name, est_cg, R_T_bank) |> print(n = Inf)
 }
 
 cli::cli_alert_info("Next: {.code Rscript analysis/bss_bias/07_catch_sensitivity.R}")

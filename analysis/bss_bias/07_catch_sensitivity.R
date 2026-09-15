@@ -109,7 +109,7 @@
 #   bss_b_T5_ladder.csv         -- deterministic b -> catch multiplier, empirical tiers + round ladder
 #   bss_b_T6_loo_backtest.csv   -- LOO backtest: ratio distribution per fishery-year x bias type
 #   bss_b_T6_calibration.csv    -- per-series PI coverage, the [S5] check
-#   bss_b_T8_gear_split.csv     -- catch by bank/boat, and whether b[2] matters there
+#   bss_b_T8_gear_split.csv     -- catch and effort by bank/boat, and how each b term moves them
 #   bss_b_T7_direct_sensitivity.csv -- vary b on a real fitted dataset, read off
 #                                      the catch: multiplier, % change, and fish
 #                                      where a C_sum baseline exists
@@ -518,62 +518,100 @@ write_csv(T7, file.path(OUT_DIR, "bss_b_T7_direct_sensitivity.csv"))
 cli::cli_alert_success("T7 direct sensitivity written ({nrow(T7)} rows).")
 
 # ------------------------------------------------------------------------------
-# T8 -- HOW MUCH DOES THE TRAILER TERM MATTER HERE?
+# T8 -- CATCH AND EFFORT BY GEAR, AND HOW EACH b TERM MOVES THEM
 #
-# The trailer index observes boat effort essentially alone (R_T for bank
-# anglers goes to ~0 from the interviews), so b[2] can only move the boat
-# component. In a fishery that is almost all bank effort, b[2] can be estimated
-# appallingly and still not matter -- and in a boat-heavy one a modest error
-# matters a great deal.
+# The two index channels observe different anglers, so solving both at once is
+# what gives the gear-level movement. With the observed counts held fixed:
 #
-# So the boat share is the thing that decides whether the trailer term is worth
-# arguing about, and it belongs next to the trailer swing rather than being
-# inferred from it. `trailer_swing_pct` is the largest change in TOTAL catch
-# that moving b[2] across that series' plausible range produces -- already
-# gear-aware, so it is the honest materiality figure.
+#   lambda_bank*R_V1 + lambda_boat*R_V2 = V_I / b1
+#   lambda_bank*R_T1 + lambda_boat*R_T2 = T_I / b2      and R_T1 ~ 0
+#
+# Writing k1 = b1_fitted/b1 and k2 = b2_fitted/b2, the second equation pins
+# boat effort and the first then determines bank:
+#
+#   lambda_boat / lambda_boat0 = k2
+#   lambda_bank / lambda_bank0 = k1*(1 + rho) - rho*k2
+#
+# where rho = (R_V2/R_V1) * (lambda_boat0/lambda_bank0) is the boat-to-bank
+# ratio of the VEHICLE count, computed per fishery-year in 09.
+#
+# Two things fall out that the simpler treatment got wrong:
+#
+#   * Moving b[1] alone does NOT rescale the whole fishery. Boat effort is held
+#     by the trailer counts, so the entire adjustment lands on bank -- and if
+#     boat anglers bring more vehicles per angler than bank anglers, bank moves
+#     by MORE than k1. The two coincide only when R_V1 = R_V2.
+#   * Moving b[2] alone does NOT leave bank untouched. Lowering boat effort
+#     frees vehicle count to be attributed to bank, so bank moves the OTHER
+#     way. The dials partly offset.
+#
+# Catch follows effort within each gear, since the catch rate is gear-specific
+# and carries no b.
 # ------------------------------------------------------------------------------
 
 gear_cols_t8 <- c("C_sum_bank_median", "C_sum_boat_median",
-                  "E_sum_bank_median", "E_sum_boat_median")
+                  "E_sum_bank_median", "E_sum_boat_median", "rho")
 
 if (!is.null(catch_base) && all(gear_cols_t8 %in% names(catch_base))) {
-  trailer_swing <- T7 |>
-    filter(bias_type == "trailer", tier_kind == "empirical",
-           !is.na(pct_change_catch_total)) |>
-    group_by(fishery_name, est_cg) |>
-    summarise(trailer_swing_pct = max(abs(pct_change_catch_total)), .groups = "drop")
 
-  vehicle_swing <- T7 |>
-    filter(bias_type == "vehicle", tier_kind == "empirical",
-           !is.na(pct_change_catch_total)) |>
-    group_by(fishery_name, est_cg) |>
-    summarise(vehicle_swing_pct = max(abs(pct_change_catch_total)), .groups = "drop")
+  base_gear <- catch_base |>
+    select(fishery_name, est_cg, all_of(gear_cols_t8), any_of("baseline_source"))
 
-  T8 <- catch_base |>
-    select(fishery_name, est_cg, all_of(gear_cols_t8),
-           any_of(c("boat_share_catch", "boat_share_effort", "baseline_source"))) |>
-    left_join(trailer_swing, by = c("fishery_name", "est_cg")) |>
-    left_join(vehicle_swing, by = c("fishery_name", "est_cg")) |>
+  T8 <- T7 |>
+    filter(tier_kind %in% c("anchor", "empirical")) |>
+    distinct(basin, fishery_type, fishery_name, year_start, bias_type, tier,
+             b_fitted, b_alt, catch_multiplier) |>
+    left_join(base_gear, by = "fishery_name", relationship = "many-to-many") |>
+    filter(!is.na(C_sum_bank_median)) |>
     mutate(
-      catch_total = C_sum_bank_median + C_sum_boat_median,
-      trailer_matters = case_when(
-        is.na(boat_share_catch)   ~ NA_character_,
-        boat_share_catch < 0.05   ~ "no -- boat effort is negligible here",
-        boat_share_catch < 0.20   ~ "marginal",
-        TRUE                      ~ "yes"
-      )
-    ) |>
-    relocate(catch_total, .after = est_cg) |>
-    arrange(desc(boat_share_catch))
+      # k for the term this row varies; the other stays at its fitted value.
+      k1 = if_else(bias_type == "vehicle", catch_multiplier, 1),
+      k2 = if_else(bias_type == "trailer", catch_multiplier, 1),
+      f_bank = k1 * (1 + rho) - rho * k2,
+      f_boat = k2,
+      effort_bank = E_sum_bank_median * f_bank,
+      effort_boat = E_sum_boat_median * f_boat,
+      catch_bank  = C_sum_bank_median * f_bank,
+      catch_boat  = C_sum_boat_median * f_boat,
+      catch_total = catch_bank + catch_boat,
+      effort_total = effort_bank + effort_boat,
+      pct_change_catch_total =
+        100 * (catch_total / (C_sum_bank_median + C_sum_boat_median) - 1)
+    )
+
+  # A negative gear total means the solve has been pushed outside the range
+  # where both index channels can be satisfied at once -- the b values are
+  # far enough apart that no non-negative effort fits them. Reported, not
+  # silently clamped.
+  impossible <- T8 |> filter(effort_bank < 0 | effort_boat < 0)
+  if (nrow(impossible) > 0) {
+    cli::cli_alert_warning(
+      "{nrow(impossible)} row{?s} imply NEGATIVE effort for one gear -- the two b values cannot \\
+       both hold at once that far apart. Left in the output, flagged here:"
+    )
+    impossible |>
+      select(fishery_name, bias_type, tier, b_alt, effort_bank, effort_boat) |>
+      print(n = Inf)
+  }
+
+  T8 <- T8 |>
+    select(basin, fishery_type, fishery_name, year_start, est_cg, bias_type, tier,
+           b_fitted, b_alt, rho,
+           catch_bank, catch_boat, catch_total,
+           effort_bank, effort_boat, effort_total,
+           pct_change_catch_total, any_of("baseline_source")) |>
+    arrange(fishery_name, est_cg, bias_type, b_alt)
 
   write_csv(T8, file.path(OUT_DIR, "bss_b_T8_gear_split.csv"))
-  cli::cli_alert_success("T8 gear split written ({nrow(T8)} fishery-year x group rows).")
+  cli::cli_alert_success("T8 gear split written ({nrow(T8)} rows).")
 
-  cli::cli_h2("Catch by gear, and whether the trailer term matters")
+  cli::cli_h2("Catch and effort by gear, as fitted")
   T8 |>
-    mutate(group = str_extract(est_cg, "^[^_]+")) |>
-    select(fishery_name, group, bank = C_sum_bank_median, boat = C_sum_boat_median,
-           boat_share_catch, trailer_swing_pct, vehicle_swing_pct, trailer_matters) |>
+    filter(tier == "as fitted", bias_type == "vehicle") |>
+    mutate(group = str_extract(est_cg, "^[^_]+"),
+           boat_share = catch_boat / catch_total) |>
+    select(fishery_name, group, catch_bank, catch_boat, boat_share,
+           effort_bank, effort_boat) |>
     print(n = Inf)
 } else {
   T8 <- NULL
