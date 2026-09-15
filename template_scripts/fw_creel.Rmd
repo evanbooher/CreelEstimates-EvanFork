@@ -944,15 +944,27 @@ save_bss_outputs <- function() {
   saveRDS(convergence_tables, file.path(outputs_folders$outputs, "convergence_tables.rds"))
 }
 
+# THIS CHUNK IS results='hide'. knitr sinks stdout and captures messages and
+# warnings into the (hidden) chunk output, so cli::cli_alert_*() here is
+# invisible at the console AND absent from the HTML -- which is how a fit that
+# failed in 24 seconds surfaced two chunks later as "Column `estimate` doesn't
+# exist" with no indication of the real cause.
+#
+# cat(file = stderr()) is not sunk, so it reaches the console during a render.
+say <- function(...) cat(paste0(..., collapse = ""), "\n", sep = "", file = stderr())
+
+# Group-level failures, collected so the end of the chunk can report them
+# together and abort if NOTHING was fitted.
+failed_groups <- character(0)
+
 # Guards a post-fit SUMMARY. The fit is complete by the time any of these run,
 # so a summary that cannot be built costs that summary and nothing else.
 # Defined here rather than inside the loop so the whole chunk can use it.
 keep_try <- function(label, expr) {
   out <- try(expr, silent = TRUE)
   if (inherits(out, "try-error")) {
-    cli::cli_alert_warning(
-      "{label} failed for {ecg} -- the fit is unaffected. {conditionMessage(attr(out, 'condition'))}"
-    )
+    say("[warn] ", label, " failed for ", ecg,
+        " -- the fit is unaffected. ", conditionMessage(attr(out, "condition")))
     return(NULL)
   }
   out
@@ -984,10 +996,11 @@ for(ecg in names(inputs_bss)) {
     silent = FALSE
   )
   if (inherits(ecg_fit, "try-error")) {
-    cli::cli_alert_danger(
-      "fit_bss FAILED for {ecg} -- skipping this catch group; any other group in this \
-       fishery is unaffected. {conditionMessage(attr(ecg_fit, 'condition'))}"
-    )
+    msg <- conditionMessage(attr(ecg_fit, "condition"))
+    say("[FAIL] fit_bss FAILED for ", ecg,
+        " -- skipping this catch group; any other group in this fishery is ",
+        "unaffected. ", msg)
+    failed_groups <- c(failed_groups, paste0(ecg, ": fit_bss -- ", msg))
     rm(ecg_fit); gc()
     next
   }
@@ -1005,7 +1018,8 @@ for(ecg in names(inputs_bss)) {
   # group rather than take down the render (and the OTHER group's fit with it).
   ecg_keep$draws <- keep_try("extract(draws)", extract(ecg_fit))
   if (is.null(ecg_keep$draws)) {
-    cli::cli_alert_danger("No draws for {ecg} -- skipping this catch group.")
+    say("[FAIL] No draws for ", ecg, " -- skipping this catch group.")
+    failed_groups <- c(failed_groups, paste0(ecg, ": extract(draws) returned nothing"))
     rm(ecg_fit); gc()
     next
   }
@@ -1232,6 +1246,20 @@ for(ecg in names(inputs_bss)) {
 # never reached its own call.
 save_bss_outputs()
 
+if (length(failed_groups) > 0) {
+  say("[FAIL] ", length(failed_groups), " catch group(s) did not produce estimates:")
+  for (f in failed_groups) say("        - ", f)
+}
+
+# A render with no estimates at all has nothing to report. Stopping HERE names
+# the real cause; letting it continue means the first display chunk fails on an
+# empty tibble ("Column `estimate` doesn't exist") and the actual failure is two
+# chunks upstream and invisible.
+if (length(estimates_bss) == 0) {
+  stop("No catch group produced estimates for this fishery. ",
+       paste(failed_groups, collapse = " | "), call. = FALSE)
+}
+
 # ---- NEW: Combine and save density plots ----
 density_plots <- map(estimates_bss, ~.$density_plot) |> purrr::compact()
 combined_density_plot <- if (isTRUE(params$fit_only) || length(density_plots) == 0) NULL else
@@ -1317,11 +1345,17 @@ purrr::iwalk(diagnostics_bss, function(diag, ecg) {
 
 ```{r BSS_summary, eval=!params$fit_only}
 
+# get_bss_overview() is guarded in the estimates_bss chunk, so a group can be
+# present with overview = NULL. Dropping those here keeps one unbuildable
+# summary from taking down the table for every other group.
 overview_combined <- purrr::imap_dfr(
-  estimates_bss,
+  purrr::keep(estimates_bss, ~ !is.null(.x$overview)),
   ~ .x$overview |> mutate(catch_group = .y)
 )
 
+if (nrow(overview_combined) == 0) {
+  cli::cli_alert_warning("No BSS overview available for any catch group -- skipping this table.")
+} else {
 # Create a gt table with row groups
 overview_combined |> 
   gt(groupname_col = "catch_group") |>
@@ -1339,7 +1373,9 @@ overview_combined |>
   tab_options(
     heading.title.font.size = px(14),
     table.font.color = "black"
-  ) 
+  ) |>
+  print()
+}
 ```
 
 #### Posterior Probability Density Plots
@@ -1348,6 +1384,12 @@ overview_combined |>
 # Extract density plots from estimates_bss list
 plots_list <- map(estimates_bss, "density_plot") |>
   compact()  # Remove any NULL plots
+
+# create_bss_density_plot() is guarded upstream, so compact() can legitimately
+# leave nothing; wrap_plots() on an empty list errors.
+if (length(plots_list) == 0) {
+  cli::cli_alert_warning("No density plots available -- skipping this figure.")
+} else {
 
 # Combine all plots vertically
 combined_figure <- wrap_plots(plots_list, ncol = 1) +
@@ -1366,6 +1408,7 @@ save_plot(
   width = 10,
   height = 12
 )
+}
 ```
 
 #### plot daily catch BSS
