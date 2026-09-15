@@ -170,7 +170,12 @@ BSS_PRIORS <- c(
 MONITOR_PARS <- c(
   "b", "R_V", "R_T", "p_I", "mu_E", "mu_C", "B1",
   "phi_E_scaled", "phi_C_scaled", "sigma_eps_E", "sigma_mu_E",
-  "E_sum", "C_sum"
+  "E_sum", "C_sum",
+  # The per-section/day/gear arrays. Needed for the gear split -- C_sum and
+  # E_sum are already summed over gear, so the split cannot be recovered from
+  # them. They are the largest thing monitored here; that is the cost of having
+  # bank and boat separately.
+  "C", "E"
 )
 
 # Guard against a "lite" setting leaking across runs in one R session. These
@@ -916,6 +921,38 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
       posterior::as_draws_df(bss_fit) |> posterior::subset_draws(variable = c("C_sum", "E_sum")),
       silent = TRUE
     )
+
+    # Gear totals, straight off the stanfit: sum C[s,d,g] and E[s,d,g] over
+    # section and day PER DRAW, keeping gear. rstan::extract() returns these as
+    # [iterations, S, D, G]; margins 1 and 4 are draw and gear, and g = 1 bank,
+    # g = 2 boat per ANGLER_LEVELS. Non-fatal: a missing split costs the gear
+    # columns, not the baseline.
+    gear_row <- try({
+      ex <- rstan::extract(bss_fit, pars = c("C", "E"))
+      gt <- function(a) if (length(dim(a)) == 4) apply(a, c(1, 4), sum, na.rm = TRUE) else NULL
+      cg <- gt(ex$C); eg <- gt(ex$E)
+      med <- function(m, g) if (!is.null(m) && ncol(m) >= g) stats::median(m[, g], na.rm = TRUE) else NA_real_
+      tibble(
+        C_sum_bank_median = med(cg, 1), C_sum_boat_median = med(cg, 2),
+        E_sum_bank_median = med(eg, 1), E_sum_boat_median = med(eg, 2)
+      )
+    }, silent = TRUE)
+    if (inherits(gear_row, "try-error")) {
+      cli::cli_alert_warning("  Gear split unavailable: {conditionMessage(attr(gear_row, 'condition'))}")
+      gear_row <- tibble(C_sum_bank_median = NA_real_, C_sum_boat_median = NA_real_,
+                         E_sum_bank_median = NA_real_, E_sum_boat_median = NA_real_)
+    }
+
+    rvt <- try({
+      rr <- rstan::extract(bss_fit, pars = c("R_V", "R_T"))
+      mm <- function(m, g) if (!is.null(m) && is.matrix(m) && ncol(m) >= g) stats::median(m[, g], na.rm = TRUE) else NA_real_
+      tibble(R_V_bank = mm(rr$R_V, 1), R_V_boat = mm(rr$R_V, 2),
+             R_T_bank = mm(rr$R_T, 1), R_T_boat = mm(rr$R_T, 2))
+    }, silent = TRUE)
+    if (inherits(rvt, "try-error")) {
+      rvt <- tibble(R_V_bank = NA_real_, R_V_boat = NA_real_,
+                    R_T_bank = NA_real_, R_T_boat = NA_real_)
+    }
     if (inherits(totals_draws, "try-error") || ncol(totals_draws) <= 3) {
       cli::cli_alert_warning("  No C_sum/E_sum draws in this fit -- catch baseline not written.")
     } else {
@@ -949,8 +986,15 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
             values_from = c(mean, sd, median, q2.5, q97.5, n_finite_frac, rhat, ess_bulk),
             names_glue = "{variable}_{.value}"
           ) |>
-          dplyr::mutate(fishery_name = .env$fishery_name, est_cg = .env$chosen_ecg,
-                        fit_config = fit_config_name, n_div = n_div, runtime_sec = runtime_sec) |>
+          dplyr::bind_cols(gear_row, rvt) |>
+          dplyr::mutate(
+            fishery_name = .env$fishery_name, est_cg = .env$chosen_ecg,
+            fit_config = fit_config_name, n_div = n_div, runtime_sec = runtime_sec,
+            # rho: boat-to-bank ratio of the VEHICLE count, the factor that
+            # decides how a change in b[1] is shared between gear types. Same
+            # definition 09 uses, so 07 reads either source identically.
+            rho = (R_V_boat / R_V_bank) * (E_sum_boat_median / E_sum_bank_median)
+          ) |>
           dplyr::relocate(fishery_name, est_cg)
         append_csv_row(totals_row, file.path(OUT_DIR, "bss_catch_baseline.csv"),
                        key_cols = c("fishery_name", "est_cg"))
