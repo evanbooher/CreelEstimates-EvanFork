@@ -83,6 +83,15 @@ library(creelutils)
 ```{r, load_functions, message=FALSE}
 # Load CreelEstimates functions (pre-package method)
 walk(list.files(here("R_functions"), full.names = T), source)
+
+# CONSOLE-VISIBLE PROGRESS, for chunks that are results='hide'.
+#
+# knitr sinks stdout and captures messages and warnings into the chunk output,
+# so in a hidden chunk cli::cli_alert_*() reaches neither the console nor the
+# HTML. Two separate failures in this file were diagnosed late for exactly that
+# reason -- an empty stanfit in estimates_bss, and whatever dwg_fetch is doing
+# with a section filter applied. cat(file = stderr()) is not sunk.
+say <- function(...) cat(paste0(..., collapse = ""), "\n", sep = "", file = stderr())
 ```
 
 ```{r resolve_dates, message=FALSE}
@@ -292,7 +301,12 @@ save_gt_table <- function(gt_obj, filename) {
 
 ## Download data
 ```{r dwg_fetch, cache=params$enable_cache, results='hide', dependson="setup", cache.extra=param_hash}
+say("[dwg_fetch] fetching ", params$fishery_name, " ...")
 dwg <- creelutils::fetch_dwg(params$fishery_name)
+say("[dwg_fetch] fetched: ",
+    paste(sprintf("%s=%d", names(dwg)[vapply(dwg, is.data.frame, logical(1))],
+                  vapply(dwg[vapply(dwg, is.data.frame, logical(1))], nrow, integer(1))),
+          collapse = " "))
 
 # Save raw data
 saveRDS(dwg, file.path(outputs_folders$inputs, "dwg_raw.rds"))
@@ -311,7 +325,7 @@ keep_sections <- suppressWarnings(as.numeric(as.character(params$section_filter)
 keep_sections <- keep_sections[is.finite(keep_sections)]
 
 if (length(keep_sections) > 0) {
-  cli_alert_info("Section filter: keeping section{?s} {.val {keep_sections}} only.")
+  say("[dwg_fetch] section filter: keeping ", paste(keep_sections, collapse = ", "))
   for (nm in names(dwg)) {
     tbl <- dwg[[nm]]
     if (!is.data.frame(tbl) || !"section_num" %in% names(tbl)) next
@@ -323,13 +337,20 @@ if (length(keep_sections) > 0) {
       # No {?s} marker: the message carries several quantities and cli aborts
       # with "Multiple quantities for pluralization" when it cannot tell which
       # governs. A progress line must not be able to fail a render.
-      gone   <- sort(unique(sec[!is.na(sec) & !sec %in% keep_sections]))
-      n_rows <- nrow(tbl)
-      gone_txt <- paste(gone, collapse = ", ")
-      cli_alert_info("  {nm}: dropped {n_dropped} of {n_rows} rows (sections {gone_txt}).")
+      gone <- sort(unique(sec[!is.na(sec) & !sec %in% keep_sections]))
+      say("[dwg_fetch]   ", nm, ": dropped ", n_dropped, " of ", nrow(tbl),
+          " rows (sections ", paste(gone, collapse = ", "), ")")
     }
-    if (nrow(kept) == 0) {
-      cli_alert_warning("  {nm}: EMPTY after the section filter.")
+    # A table that had rows and now has none is not a warning to scroll past.
+    # dwg$ll feeds mean(centroid_lat/lon) straight into prep_days(), so an empty
+    # one turns the fishery's coordinates into NaN and the failure surfaces
+    # somewhere unrecognisable downstream.
+    if (nrow(tbl) > 0 && nrow(kept) == 0) {
+      stop("section filter emptied dwg$", nm,
+           " -- its section_num values (",
+           paste(utils::head(sort(unique(sec)), 10), collapse = ", "),
+           ") do not overlap the filter (",
+           paste(keep_sections, collapse = ", "), ").", call. = FALSE)
     }
   }
 }
@@ -355,27 +376,22 @@ if (isTRUE(params$trim_to_last_sampled)) {
   sampled_dates <- sampled_dates[!is.na(sampled_dates) & sampled_dates <= win_end]
 
   if (length(sampled_dates) == 0) {
-    cli_alert_warning(
-      "trim_to_last_sampled: nothing sampled on or before {.val {as.character(win_end)}} \
-       -- leaving the window alone."
-    )
+    say("[dwg_fetch] trim: nothing sampled on or before ", as.character(win_end),
+        " -- leaving the window alone.")
   } else {
     last_sampled <- max(sampled_dates)
     n_trimmed <- as.integer(win_end - last_sampled)
     if (n_trimmed > 0) {
       est_dates$est_date_end <- as.character(last_sampled)
-      # No {?s} marker: two quantities in one message is what cli aborts on.
-      end_txt <- as.character(last_sampled)
-      cli_alert_info(
-        "Window trimmed to the last sampled date: {end_txt} \
-         ({n_trimmed} unsampled days removed from the end)."
-      )
+      say("[dwg_fetch] trim: window now ends ", as.character(last_sampled),
+          " (", n_trimmed, " unsampled days removed)")
     } else {
-      cli_alert_info("Window already ends on the last sampled date.")
+      say("[dwg_fetch] trim: window already ends on the last sampled date.")
     }
   }
 }
 
+say("[dwg_fetch] prep_days: ", est_dates$est_date_start, " to ", est_dates$est_date_end)
 dwg$days <- prep_days(
   params = params,
   date_begin = est_dates$est_date_start, 
@@ -1041,14 +1057,8 @@ save_bss_outputs <- function() {
   saveRDS(convergence_tables, file.path(outputs_folders$outputs, "convergence_tables.rds"))
 }
 
-# THIS CHUNK IS results='hide'. knitr sinks stdout and captures messages and
-# warnings into the (hidden) chunk output, so cli::cli_alert_*() here is
-# invisible at the console AND absent from the HTML -- which is how a fit that
-# failed in 24 seconds surfaced two chunks later as "Column `estimate` doesn't
-# exist" with no indication of the real cause.
-#
-# cat(file = stderr()) is not sunk, so it reaches the console during a render.
-say <- function(...) cat(paste0(..., collapse = ""), "\n", sep = "", file = stderr())
+# say() is defined in the load_functions chunk: this chunk is results='hide',
+# so cli::cli_alert_*() would reach neither the console nor the HTML.
 
 # Group-level failures, collected so the end of the chunk can report them
 # together and abort if NOTHING was fitted.
