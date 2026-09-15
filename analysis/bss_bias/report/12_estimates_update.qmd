@@ -1,7 +1,9 @@
 ---
 title: "Estimated effort and catch by gear, and what `b` moves"
-subtitle: "Skagit / Snohomish / Stillaguamish freshwater creel -- part 2 of 2"
+subtitle: "Freshwater creel -- part 2 of 2"
 date: today
+params:
+  focus: "Stillaguamish"
 format:
   html:
     embed-resources: true
@@ -47,6 +49,10 @@ need <- function(f) {
 T7 <- need("bss_b_T7_direct_sensitivity.csv")
 T8 <- need("bss_b_T8_gear_split.csv")
 
+# Same params as part 1, so the two halves of a basin's packet are rendered
+# with the same flag and cannot drift apart.
+FOCUS_RE <- params$focus
+
 if (all(is.na(T7$catch_estimate))) {
   stop("T7 has no season totals -- bss_catch_baseline.csv was missing when ",
        "07_catch_sensitivity.R ran. Run 09_read_production_estimates.R, then 07, ",
@@ -70,6 +76,7 @@ group_label <- function(x) {
 # vehicle is taken arbitrarily.
 as_fitted <- T8 |>
   filter(tier_kind == "anchor", bias_type == "vehicle") |>
+  filter(str_detect(fishery_type, FOCUS_RE)) |>
   mutate(group = group_label(est_cg),
          boat_share_catch  = catch_boat / catch_total,
          boat_share_effort = effort_boat / effort_total) |>
@@ -100,13 +107,25 @@ wide <- T7 |>
     pct_high  = pct_change_catch_total_high
   ) |>
   filter(!is.na(fitted)) |>
+  filter(str_detect(fishery_type, FOCUS_RE)) |>
   arrange(fishery_type, year_start, group, bias_type)
+
+if (nrow(wide) == 0) stop("No fishery_type matches focus = '", FOCUS_RE, "'.", call. = FALSE)
+
+# The series name for prose and headings, taken from the data rather than passed
+# in. Guarantees the label matches what the filter actually kept, and keeps the
+# only command-line param a single word with no quoting hazard.
+SERIES_LABEL <- {
+  ft <- sort(unique(wide$fishery_type))
+  if (length(ft) == 1) ft else paste(ft, collapse = " / ")
+}
+
 ```
 
 Part 1 established the relationship: **estimated catch moves one-for-one in the
 opposite direction from `b`**, and the catch rate does not move at all. The
 percentages there hold for every species and catch group. This part puts the
-same result in fish, and splits it by gear.
+same result in fish for **`r SERIES_LABEL`**, and splits it by gear.
 
 ## Season totals as fitted
 

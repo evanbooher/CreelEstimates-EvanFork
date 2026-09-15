@@ -239,16 +239,37 @@ Part 2 is the **complement, not a correction** -- nothing in part 1 changes when
 the fits land. It `stop()`s loudly rather than rendering against an absent or
 all-`NA` baseline.
 
+Both are **rendered once per basin** from a single source, so the copies cannot
+drift apart as the text is edited. `focus` is matched against `fishery_type`,
+so a basin name is enough; the document derives its own display label from the
+rows it kept.
+
 ```
 # part 1 -- sendable as soon as 07 has run
 Rscript analysis/bss_bias/07_catch_sensitivity.R
-quarto render analysis/bss_bias/report/11_share_brief.qmd
+Rscript analysis/bss_bias/report/render_briefs.R
 
-# part 2 -- after the production fits exist
+# part 2 -- after the production fits exist; the same driver picks it up
 Rscript analysis/bss_bias/09_read_production_estimates.R
 Rscript analysis/bss_bias/07_catch_sensitivity.R
-quarto render analysis/bss_bias/report/12_estimates_update.qmd
+Rscript analysis/bss_bias/report/render_briefs.R
 ```
+
+`render_briefs.R` defaults to `BRIEF_FOCI <- c("Stillaguamish", "Snohomish")`
+and writes `11_share_brief_stillaguamish.html`,
+`11_share_brief_snohomish.html`, and the matching part 2 files. It renders part
+1 only, with a note, while `bss_b_T8_gear_split.csv` is absent. To do one by
+hand:
+
+```
+quarto render analysis/bss_bias/report/11_share_brief.qmd -P focus:Skagit
+```
+
+**The reliability backtest is deliberately not subset by `focus`.** How well a
+borrowed `b` predicts is a question about the method, and any single basin
+contributes only a handful of the 43 held-out tests. The figures are scored
+across all three basins, with the focal basin's own rows called out inside
+them.
 
 ## Reproducing this outside WDFW
 

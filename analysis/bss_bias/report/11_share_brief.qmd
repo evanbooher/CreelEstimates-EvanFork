@@ -1,7 +1,9 @@
 ---
 title: "Effort-index bias (`b`): what it does to estimated catch"
-subtitle: "Skagit / Snohomish / Stillaguamish freshwater creel -- part 1 of 2"
+subtitle: "Freshwater creel -- part 1 of 2"
 date: today
+params:
+  focus: "Stillaguamish"
 format:
   html:
     embed-resources: true
@@ -43,6 +45,20 @@ need <- function(f) {
 T7  <- need("bss_b_T7_direct_sensitivity.csv")
 cal <- need("bss_b_T6_calibration.csv")
 
+# Which series this brief is about. A PARAM, not a constant, so one document
+# renders a per-basin brief for each collaborator group:
+#
+#   quarto render 11_share_brief.qmd -P focus:Stillaguamish ...
+#   quarto render 11_share_brief.qmd -P focus:Snohomish ...
+#
+# NOTE what is NOT subset by it: the backtest below. How well a borrowed b
+# predicts is a question about the METHOD, and any one basin contributes only a
+# handful of the 43 held-out tests. Scoring the method on those alone would be a
+# weaker claim resting on a smaller sample, so the reliability figures stay
+# across all three basins and the focal basin's own rows are called out within
+# them.
+FOCUS_RE <- params$focus
+
 # One row per fishery-year x b term: b as fitted, the ends of that series' own
 # plausible range, and the percent change in catch at each end.
 #
@@ -73,7 +89,19 @@ wide <- T7 |>
     pct_high = pct_change_catch_high     # b at the HIGH end -> catch DOWN
   ) |>
   filter(!is.na(b_low), !is.na(b_high)) |>
+  filter(str_detect(fishery_type, FOCUS_RE)) |>
   arrange(fishery_type, year_start, bias_type)
+
+if (nrow(wide) == 0) stop("No fishery_type matches focus = '", FOCUS_RE, "'.", call. = FALSE)
+
+# The series name for prose and headings, taken from the data rather than passed
+# in. Guarantees the label matches what the filter actually kept, and keeps the
+# only command-line param a single word with no quoting hazard.
+SERIES_LABEL <- {
+  ft <- sort(unique(wide$fishery_type))
+  if (length(ft) == 1) ft else paste(ft, collapse = " / ")
+}
+
 ```
 
 `b` is the correction between what an index count sees and how many anglers are
@@ -81,6 +109,10 @@ actually out there. Measuring it needs census (tie-in) counts. The question on
 the table is whether a `b` carried over from previous years can stand in for a
 measured one in a year where census counts are not collected -- and if it can,
 how much the catch estimate moves when that borrowed `b` is off.
+
+This brief covers **`r SERIES_LABEL`**. The mechanism below is general and the
+reliability check draws on all three basins, but the numbers in the table are
+`r SERIES_LABEL`'s own.
 
 **Catch moves one-for-one in the opposite direction from `b`.** Double `b` and
 the catch estimate is cut in half; halve `b` and it doubles; a `b` that is 10%
@@ -140,18 +172,38 @@ under discussion, and the larger of the two.
 ## How close a borrowed `b` gets
 
 ```{r calibration-line, results = "asis"}
+# Deliberately NOT subset to FOCUS_RE -- see the note in the setup chunk. How
+# well the method predicts is scored on every series, then the focal basin's own
+# rows are reported inside that.
 v <- cal |> filter(bias_type == "vehicle")
 t <- cal |> filter(bias_type == "trailer")
 cat(sprintf(
   paste0("Each fishery-year with a measured `b` was predicted from the **other** years of ",
          "its own series and nothing else, then compared against what was actually ",
-         "measured -- %d such tests in all. A predicted **vehicle** `b` landed within ",
-         "**%.0f%%** of the measured value in the typical year, worst case %.0f%%. The ",
-         "**trailer** term is considerably less reliable: typically **%.0f%%** off, worst ",
-         "case **%.0f%%**.\n"),
+         "measured -- %d such tests across the three basins. A predicted **vehicle** `b` ",
+         "landed within **%.0f%%** of the measured value in the typical year, worst case ",
+         "%.0f%%. The **trailer** term is considerably less reliable: typically ",
+         "**%.0f%%** off, worst case **%.0f%%**.\n\n"),
   sum(cal$n_years_tested),
   median(v$median_abs_pct_err), max(abs(v$worst_pct_err)),
   median(t$median_abs_pct_err), max(abs(t$worst_pct_err))
+))
+
+foc <- cal |> filter(str_detect(fishery_type, FOCUS_RE))
+fv  <- foc |> filter(bias_type == "vehicle")
+ft  <- foc |> filter(bias_type == "trailer")
+# A basin missing one of the two terms would otherwise print NA and -Inf into a
+# document going to co-managers. Say nothing rather than that.
+if (nrow(fv) > 0 && nrow(ft) > 0) cat(sprintf(
+  paste0("%s contributes %d of those tests. Its **vehicle** term came in ",
+         "inside the interval %d of %d times, typically **%.0f%%** off the measured ",
+         "value (worst %.0f%%); its **trailer** term %d of %d, typically **%.0f%%** off ",
+         "(worst %.0f%%).\n"),
+  SERIES_LABEL, sum(foc$n_years_tested),
+  sum(fv$n_inside_95_pi), sum(fv$n_years_tested),
+  median(fv$median_abs_pct_err), max(abs(fv$worst_pct_err)),
+  sum(ft$n_inside_95_pi), sum(ft$n_years_tested),
+  median(ft$median_abs_pct_err), max(abs(ft$worst_pct_err))
 ))
 ```
 
