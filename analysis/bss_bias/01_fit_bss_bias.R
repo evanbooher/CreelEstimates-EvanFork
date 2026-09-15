@@ -1092,6 +1092,8 @@ target_fisheries <- read_csv(discovery_path, show_col_types = FALSE) |>
   unique()
 
 if (!is.null(ONLY_FISHERIES)) {
+  # Before narrowing, so a failed match can say what was on offer.
+  all_target_fisheries <- target_fisheries
   not_queued <- setdiff(ONLY_FISHERIES, target_fisheries)
   if (length(not_queued) > 0) {
     cli::cli_alert_warning(
@@ -1100,9 +1102,33 @@ if (!is.null(ONLY_FISHERIES)) {
   }
   target_fisheries <- intersect(target_fisheries, ONLY_FISHERIES)
   if (length(target_fisheries) == 0) {
+    # ONLY_FISHERIES matches EXACT names (intersect, above). 10_render_fw_creel.R's
+    # RENDER_FISHERY_RE is a regex, and the two get mixed up -- a pattern passed
+    # here matches nothing and the message about spelling sends you to the CSV
+    # to look for a name that is already right. Say which mistake it is, and
+    # what the pattern would have matched.
+    looks_like_regex <- any(grepl("[\\^$|*+?\\[\\](){}\\\\]", ONLY_FISHERIES))
+    hint <- if (looks_like_regex) {
+      # tryCatch: an unbalanced bracket is itself a plausible reason the match
+      # failed, and grep() erroring inside an error handler would bury it.
+      would_match <- unique(unlist(lapply(
+        ONLY_FISHERIES,
+        function(p) tryCatch(grep(p, all_target_fisheries, value = TRUE),
+                             error = function(e) character(0))
+      )))
+      c("!" = "ONLY_FISHERIES takes EXACT fishery names, not a regex \\
+                (that is {.code RENDER_FISHERY_RE} in {.file 10_render_fw_creel.R}).",
+        if (length(would_match) > 0)
+          c("i" = "As a pattern it would have matched: {.val {would_match}}")
+        else
+          c("i" = "As a pattern it would have matched nothing either."))
+    } else {
+      c("i" = "Check spelling against {.file {discovery_path}}, or set \\
+               {.code ONLY_FISHERIES <- NULL} to run everything.")
+    }
     cli::cli_abort(c(
       "ONLY_FISHERIES matched no fishery-year in the include_in_run set.",
-      "i" = "Check spelling against {.file {discovery_path}}, or set {.code ONLY_FISHERIES <- NULL} to run everything."
+      hint
     ))
   }
   cli::cli_alert_info("ONLY_FISHERIES is set -- restricting this run to {length(target_fisheries)} fishery-year(s).")
