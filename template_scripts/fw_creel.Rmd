@@ -25,7 +25,7 @@ params:
   export: "local"
   export_tables: "both"
   enable_cache: FALSE  # Set to FALSE to disable all caching (useful when cached files become too large)
-  fit_only: FALSE  # TRUE skips every plot/table/export chunk -- fetch, prep, sample, save estimates_bss.rds, nothing else
+  fit_only: FALSE  # TRUE skips every plot/table/export chunk -- fetch, prep, sample, save estimates_bss.rds, nothing else. Default FALSE: a rendered report should have something in it.
   save_draws: FALSE  # TRUE keeps posterior draws in estimates_bss.rds (needed by any downstream analysis that reads C_sum/E_sum/b)
 output:
   html_document:
@@ -964,6 +964,16 @@ for(ecg in names(inputs_bss)) {
   estimates_bss[[ecg]] <- ecg_keep
   
   # ---- START: Process draws and generate convergence diagnostics ----
+  # WRAPPED. Everything from here to the END marker is diagnostics and draw
+  # reshaping. It sits between the fit and the saveRDS of estimates_bss, so a
+  # failure in it costs the completed fit -- which is exactly what happened:
+  # "`x` must be a vector" out of this block took down Snohomish fall salmon
+  # 2022 and 2023 and left no estimates_bss.rds at all.
+  #
+  # The estimates themselves are already in estimates_bss[[ecg]] by this point.
+  # Reshaping draws for a convergence table must not be able to destroy them.
+  .diag_ok <- TRUE
+  try({
   # Extract draws from fit object 
   draws_array_temp <- posterior::as_draws_array(ecg_fit)
   draws_df_full <- posterior::as_draws_df(draws_array_temp)
@@ -1010,7 +1020,7 @@ for(ecg in names(inputs_bss)) {
   convergence_tables[[ecg]] <- convergence_table
   
   # Save convergence diagnostics (creates gt table and saves to figures folder)
-  save_convergence_diagnostics(convergence_table, ecg, outputs_folders)
+  if (.diag_ok) save_convergence_diagnostics(convergence_table, ecg, outputs_folders)
   
   # ---- UPDATED: Clean up memory - conditionally remove draws ----
   if (!save_draws) {
@@ -1027,6 +1037,14 @@ for(ecg in names(inputs_bss)) {
     rm(draws_df_full)
     gc()
     cli::cli_alert_info("Draws retained for catch group: {ecg}")
+  }
+  }, silent = FALSE) -> .diag_try
+  if (inherits(.diag_try, "try-error")) {
+    .diag_ok <- FALSE
+    cli::cli_alert_warning(
+      "Draw processing / convergence diagnostics FAILED for {ecg} -- the fit itself is fine and \
+       will still be saved. Message: {conditionMessage(attr(.diag_try, 'condition'))}"
+    )
   }
   # ---- END: Process draws and generate convergence diagnostics ----
   
