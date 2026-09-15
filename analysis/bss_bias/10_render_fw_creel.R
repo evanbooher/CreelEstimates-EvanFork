@@ -118,6 +118,10 @@ BASE_PARAMS <- list(
 # BASE_PARAMS for that run only -- e.g. a fishery that needs a different
 # study_design or a pinned window.
 RUN_PARAM_OVERRIDES <- list(
+  # Mainstem Stillaguamish only. 2022-23 carries sections beyond the mainstem
+  # that the other years of the series do not, which both breaks comparability
+  # with them and is the source of that year's unmatched closure rows.
+  "Stillaguamish salmon and gamefish 2022-23" = list(section_filter = c(1, 2, 3))
   # "Stillaguamish salmon and gamefish 2025-26" = list(est_date_start = "2025-09-01")
 )
 

@@ -215,3 +215,30 @@ information — a range, a qualifier, a sentinel. Until someone looks, treat
 totals for the affected fishery-years as provisional. The BSS fits reach
 `fish_count` through a different path and are not known to be affected, but
 that has not been verified either.
+
+## 9. Stillaguamish 2022-23 covers sections the rest of the series does not
+
+**What happens:** the 2022-23 fetch returns sections beyond the mainstem
+(1–3) that the other years of `Stillaguamish salmon and gamefish` do not
+carry. It is also the year whose closure table produced unmatched
+`(section_num, event_date)` keys — 122 of them — which aborted `prep_days()`
+until `rows_update(unmatched = "ignore")` went in.
+
+**Why it matters:** a `b` series is only meaningful if every year in it
+describes the same fishery. A year that includes water the others exclude has
+a different mix of bank and boat effort and a different relationship between
+index counts and anglers, so its `b` is not exchangeable with the rest — which
+is precisely the assumption the whole comparability argument rests on.
+
+**Handled here:** `10_render_fw_creel.R` sets
+`section_filter = c(1, 2, 3)` for that fishery-year via `RUN_PARAM_OVERRIDES`.
+`fw_creel.Rmd` applies it to every `dwg` table carrying `section_num`, after
+`dwg_raw.rds` is written and before `prep_days()` builds the day grid, and
+reports the row counts dropped per table.
+
+**Not yet investigated:** whether the extra sections are tributaries, a
+different reach naming convention, or a data-entry artifact; and whether any
+*other* fishery-year in the three basins has the same problem. The section
+sets per fishery-year have not been compared systematically — if they differ
+elsewhere, the affected `b` estimates carry the same objection and the fix is
+the same override.

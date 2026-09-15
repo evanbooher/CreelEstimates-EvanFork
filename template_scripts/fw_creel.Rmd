@@ -27,6 +27,7 @@ params:
   enable_cache: FALSE  # Set to FALSE to disable all caching (useful when cached files become too large)
   fit_only: FALSE  # TRUE skips every plot/table/export chunk -- fetch, prep, sample, save estimates_bss.rds, nothing else. Default FALSE: a rendered report should have something in it.
   save_draws: FALSE  # TRUE keeps posterior draws in estimates_bss.rds (needed by any downstream analysis that reads C_sum/E_sum/b)
+  section_filter: !r numeric(0)  # e.g. c(1,2,3) to estimate only those sections; empty keeps every section the fetch returns
 output:
   html_document:
     toc: true
@@ -294,6 +295,43 @@ dwg <- creelutils::fetch_dwg(params$fishery_name)
 
 # Save raw data
 saveRDS(dwg, file.path(outputs_folders$inputs, "dwg_raw.rds"))
+
+# ---- Optional section filter --------------------------------------------------
+# Restrict the whole analysis to a subset of sections, e.g. the mainstem only.
+# Applied AFTER dwg_raw.rds is written, so the unfiltered fetch is always kept,
+# and BEFORE prep_days(), which builds the day grid and the open_section_*
+# columns off whatever sections are present -- filtering later would leave the
+# grid spanning sections no longer in the data.
+#
+# Every dwg table carrying section_num is filtered together. Doing it by column
+# presence rather than a hard-coded list of tables means a table added to
+# fetch_dwg() later is covered without this needing to be revisited.
+keep_sections <- suppressWarnings(as.numeric(as.character(params$section_filter)))
+keep_sections <- keep_sections[is.finite(keep_sections)]
+
+if (length(keep_sections) > 0) {
+  cli_alert_info("Section filter: keeping section{?s} {.val {keep_sections}} only.")
+  for (nm in names(dwg)) {
+    tbl <- dwg[[nm]]
+    if (!is.data.frame(tbl) || !"section_num" %in% names(tbl)) next
+    sec  <- suppressWarnings(as.numeric(as.character(tbl$section_num)))
+    kept <- tbl[!is.na(sec) & sec %in% keep_sections, , drop = FALSE]
+    dwg[[nm]] <- kept
+    n_dropped <- nrow(tbl) - nrow(kept)
+    if (n_dropped > 0) {
+      # No {?s} marker: the message carries several quantities and cli aborts
+      # with "Multiple quantities for pluralization" when it cannot tell which
+      # governs. A progress line must not be able to fail a render.
+      gone   <- sort(unique(sec[!is.na(sec) & !sec %in% keep_sections]))
+      n_rows <- nrow(tbl)
+      gone_txt <- paste(gone, collapse = ", ")
+      cli_alert_info("  {nm}: dropped {n_dropped} of {n_rows} rows (sections {gone_txt}).")
+    }
+    if (nrow(kept) == 0) {
+      cli_alert_warning("  {nm}: EMPTY after the section filter.")
+    }
+  }
+}
 
 dwg$days <- prep_days(
   params = params,
