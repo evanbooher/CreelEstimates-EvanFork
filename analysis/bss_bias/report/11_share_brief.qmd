@@ -66,6 +66,55 @@ over-counts relative to anglers, so effort and catch are revised **down**, and
 a lower `b` revises them **up**. Effort moves by exactly the same factor, so the
 catch **rate** does not change — only the scale of the fishery.
 
+::: {.callout-note collapse="true"}
+## Why catch scales as 1/`b`
+
+Three observations enter the effort side of the model, and only one carries
+$b$ (notation as in the full report):
+
+$$
+\begin{aligned}
+E_s &\sim \text{Poisson}\big(\lambda\big)
+  &&\text{census (tie-in): everything in the block}\\[2pt]
+V_I &\sim \text{Poisson}\big(\lambda \cdot R_V \cdot b_1\big)
+  &&\text{vehicle index: the counted sites}\\[2pt]
+V_A &\sim \text{Binomial}\big(A_A,\; R_V\big)
+  &&\text{interviews: } A_A \text{ anglers, } V_A \text{ vehicles}
+\end{aligned}
+$$
+
+**With no census**, the first line is absent and $\lambda$ — anglers present —
+is pinned only by the index counts:
+
+$$
+\lambda \;=\; \frac{V_I}{R_V \;\cdot\; b_1}
+$$
+
+Catch is effort $\times$ trip length $\times$ catch rate, and the catch rate
+$c$ comes from the interviews alone — it never sees $b$:
+
+$$
+C \;=\; \lambda \cdot L \cdot c
+\;=\; \frac{V_I \cdot L \cdot c}{R_V \cdot b_1}
+$$
+
+$V_I$ is the count itself, $L$ is day length, and $R_V$ and $c$ both come from
+the interviews. Every term but $b_1$ is fixed by something other than $b$, so
+
+$$
+C \;\propto\; \frac{1}{b_1}
+$$
+
+Effort is $E = \lambda \cdot L$, which carries the same $1/b_1$, so the catch
+rate $C/E = c$ is **unchanged** by $b$. That is why `b` rescales the fishery
+without changing the rate at which fish are caught.
+
+**With census**, $E_s \sim \text{Poisson}(\lambda)$ pins $\lambda$ directly,
+$b$ no longer has to absorb the difference, and the effect is smaller than
+shown here. The tables below are therefore the census-free case — the scenario
+under discussion, and the larger of the two.
+:::
+
 Using a predicted `b` instead of measuring one with census counts moves the
 catch estimate by the amounts below. Low and high are that series' own
 plausible range for `b`, taken from its history — not hypothetical values.
@@ -129,8 +178,7 @@ of that series' plausible range for `b`.
 
 ---
 
-*Method: `b` is the bias term on the effort index count in the BSS creel model.
-Catch is effort x trip length x catch rate, and `b` enters only through effort,
-so catch is proportional to 1/`b`. Reliability figures are a leave-one-out
+*Method: `b` is the bias term on the effort index count in the BSS creel model;
+the derivation above is the one in the full report. Reliability figures are a leave-one-out
 backtest: each year predicted from the other years of its series, never from a
 mean containing itself. Full detail and code in `analysis/bss_bias/`.*
