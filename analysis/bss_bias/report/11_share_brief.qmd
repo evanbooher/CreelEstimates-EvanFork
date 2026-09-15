@@ -159,6 +159,42 @@ wide |>
   tab_source_note("Fish. Low and high are the ends of that series' plausible range for b, from its own history.")
 ```
 
+## Does the trailer term matter in this fishery?
+
+The trailer index counts boat trailers, so `b` for trailers can only move the
+boat share of the catch. Where boat effort is small, that term can be poorly
+estimated and still barely affect the total.
+
+```{r gear-split}
+t8_path <- file.path(OUT_DIR, "bss_b_T8_gear_split.csv")
+if (file.exists(t8_path)) {
+  readr::read_csv(t8_path, show_col_types = FALSE) |>
+    mutate(group = group_label(est_cg)) |>
+    select(fishery_name, group, C_sum_bank_median, C_sum_boat_median,
+           boat_share_catch, trailer_swing_pct, vehicle_swing_pct) |>
+    gt() |>
+    cols_label(
+      fishery_name       = "Fishery",
+      group              = "Catch group",
+      C_sum_bank_median  = "Bank",
+      C_sum_boat_median  = "Boat",
+      boat_share_catch   = "Boat share",
+      trailer_swing_pct  = "Trailer b swing",
+      vehicle_swing_pct  = "Vehicle b swing"
+    ) |>
+    fmt_number(c(C_sum_bank_median, C_sum_boat_median), decimals = 0) |>
+    fmt_percent(boat_share_catch, decimals = 0) |>
+    fmt_number(c(trailer_swing_pct, vehicle_swing_pct), decimals = 0, pattern = "{x}%") |>
+    sub_missing(everything(), missing_text = "--") |>
+    tab_options(table.font.size = 13, data_row.padding = px(4)) |>
+    tab_source_note(
+      "Catch in fish. Swing is the largest change in TOTAL catch that moving that b term across its plausible range produces."
+    )
+} else {
+  cat("*Gear split not available -- run 09_read_production_estimates.R, then 07.*")
+}
+```
+
 ```{r figure, fig.width = 9, fig.height = 6}
 fig <- wide |>
   mutate(label = paste0(fishery_name)) |>

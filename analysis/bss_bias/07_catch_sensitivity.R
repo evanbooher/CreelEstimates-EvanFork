@@ -109,6 +109,7 @@
 #   bss_b_T5_ladder.csv         -- deterministic b -> catch multiplier, empirical tiers + round ladder
 #   bss_b_T6_loo_backtest.csv   -- LOO backtest: ratio distribution per fishery-year x bias type
 #   bss_b_T6_calibration.csv    -- per-series PI coverage, the [S5] check
+#   bss_b_T8_gear_split.csv     -- catch by bank/boat, and whether b[2] matters there
 #   bss_b_T7_direct_sensitivity.csv -- vary b on a real fitted dataset, read off
 #                                      the catch: multiplier, % change, and fish
 #                                      where a C_sum baseline exists
@@ -515,6 +516,71 @@ T7 <- T7 |>
 
 write_csv(T7, file.path(OUT_DIR, "bss_b_T7_direct_sensitivity.csv"))
 cli::cli_alert_success("T7 direct sensitivity written ({nrow(T7)} rows).")
+
+# ------------------------------------------------------------------------------
+# T8 -- HOW MUCH DOES THE TRAILER TERM MATTER HERE?
+#
+# The trailer index observes boat effort essentially alone (R_T for bank
+# anglers goes to ~0 from the interviews), so b[2] can only move the boat
+# component. In a fishery that is almost all bank effort, b[2] can be estimated
+# appallingly and still not matter -- and in a boat-heavy one a modest error
+# matters a great deal.
+#
+# So the boat share is the thing that decides whether the trailer term is worth
+# arguing about, and it belongs next to the trailer swing rather than being
+# inferred from it. `trailer_swing_pct` is the largest change in TOTAL catch
+# that moving b[2] across that series' plausible range produces -- already
+# gear-aware, so it is the honest materiality figure.
+# ------------------------------------------------------------------------------
+
+gear_cols_t8 <- c("C_sum_bank_median", "C_sum_boat_median",
+                  "E_sum_bank_median", "E_sum_boat_median")
+
+if (!is.null(catch_base) && all(gear_cols_t8 %in% names(catch_base))) {
+  trailer_swing <- T7 |>
+    filter(bias_type == "trailer", tier_kind == "empirical",
+           !is.na(pct_change_catch_total)) |>
+    group_by(fishery_name, est_cg) |>
+    summarise(trailer_swing_pct = max(abs(pct_change_catch_total)), .groups = "drop")
+
+  vehicle_swing <- T7 |>
+    filter(bias_type == "vehicle", tier_kind == "empirical",
+           !is.na(pct_change_catch_total)) |>
+    group_by(fishery_name, est_cg) |>
+    summarise(vehicle_swing_pct = max(abs(pct_change_catch_total)), .groups = "drop")
+
+  T8 <- catch_base |>
+    select(fishery_name, est_cg, all_of(gear_cols_t8),
+           any_of(c("boat_share_catch", "boat_share_effort", "baseline_source"))) |>
+    left_join(trailer_swing, by = c("fishery_name", "est_cg")) |>
+    left_join(vehicle_swing, by = c("fishery_name", "est_cg")) |>
+    mutate(
+      catch_total = C_sum_bank_median + C_sum_boat_median,
+      trailer_matters = case_when(
+        is.na(boat_share_catch)   ~ NA_character_,
+        boat_share_catch < 0.05   ~ "no -- boat effort is negligible here",
+        boat_share_catch < 0.20   ~ "marginal",
+        TRUE                      ~ "yes"
+      )
+    ) |>
+    relocate(catch_total, .after = est_cg) |>
+    arrange(desc(boat_share_catch))
+
+  write_csv(T8, file.path(OUT_DIR, "bss_b_T8_gear_split.csv"))
+  cli::cli_alert_success("T8 gear split written ({nrow(T8)} fishery-year x group rows).")
+
+  cli::cli_h2("Catch by gear, and whether the trailer term matters")
+  T8 |>
+    mutate(group = str_extract(est_cg, "^[^_]+")) |>
+    select(fishery_name, group, bank = C_sum_bank_median, boat = C_sum_boat_median,
+           boat_share_catch, trailer_swing_pct, vehicle_swing_pct, trailer_matters) |>
+    print(n = Inf)
+} else {
+  T8 <- NULL
+  cli::cli_alert_info(
+    "No gear split in the baseline -- skipping T8. Run {.file 09_read_production_estimates.R}."
+  )
+}
 
 # ------------------------------------------------------------------------------
 # T6 -- the leave-one-out backtest  [S1] [S2]
