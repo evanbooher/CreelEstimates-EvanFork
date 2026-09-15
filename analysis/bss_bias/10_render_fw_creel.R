@@ -118,10 +118,26 @@ BASE_PARAMS <- list(
 # BASE_PARAMS for that run only -- e.g. a fishery that needs a different
 # study_design or a pinned window.
 RUN_PARAM_OVERRIDES <- list(
-  # Mainstem Stillaguamish only. 2022-23 carries sections beyond the mainstem
-  # that the other years of the series do not, which both breaks comparability
-  # with them and is the source of that year's unmatched closure rows.
-  "Stillaguamish salmon and gamefish 2022-23" = list(section_filter = c(1, 2, 3))
+  # Stillaguamish 2022-23: mainstem sections only, and a window truncated before
+  # the late-November tail.
+  #
+  # SECTIONS -- this year carries sections beyond the mainstem that the rest of
+  # its series does not. A b series only means something if every year in it
+  # describes the same fishery, and this is also the source of that year's
+  # unmatched closure rows.
+  #
+  # DATES -- the lookup table gives 2022-09-01 to 2022-11-30 (91 days), the
+  # longest window in the series. Both ends are pinned here rather than just the
+  # end: resolve_dates() queries the database whenever EITHER is blank, so
+  # pinning both also makes this run reproducible without a connection.
+  #
+  # 2022-11-15 IS AN ASSUMPTION, not a value read off the data -- change this one
+  # date if the tail starts somewhere else.
+  "Stillaguamish salmon and gamefish 2022-23" = list(
+    section_filter = c(1, 2, 3),
+    est_date_start = "2022-09-01",
+    est_date_end   = "2022-11-15"
+  )
   # "Stillaguamish salmon and gamefish 2025-26" = list(est_date_start = "2025-09-01")
 )
 

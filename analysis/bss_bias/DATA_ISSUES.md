@@ -230,11 +230,20 @@ a different mix of bank and boat effort and a different relationship between
 index counts and anglers, so its `b` is not exchangeable with the rest — which
 is precisely the assumption the whole comparability argument rests on.
 
+It also runs the longest window in the series -- 2022-09-01 to 2022-11-30, 91
+days, against 76 for 2024-25 and 61 for 2025-26 -- with a sparse tail of late
+November dates that the other years do not have.
+
 **Handled here:** `10_render_fw_creel.R` sets
-`section_filter = c(1, 2, 3)` for that fishery-year via `RUN_PARAM_OVERRIDES`.
-`fw_creel.Rmd` applies it to every `dwg` table carrying `section_num`, after
-`dwg_raw.rds` is written and before `prep_days()` builds the day grid, and
-reports the row counts dropped per table.
+`section_filter = c(1, 2, 3)` and pins the window to 2022-09-01 / 2022-11-15 for
+that fishery-year via `RUN_PARAM_OVERRIDES`. `fw_creel.Rmd` applies the section
+filter to every `dwg` table carrying `section_num`, after `dwg_raw.rds` is
+written and before `prep_days()` builds the day grid, and reports the row counts
+dropped per table.
+
+**The 2022-11-15 cutoff is a judgement call, not a value read off the data.**
+It is one line in `RUN_PARAM_OVERRIDES`. Anyone revisiting this should look at
+where effort counts actually thin out and move it.
 
 **Not yet investigated:** whether the extra sections are tributaries, a
 different reach naming convention, or a data-entry artifact; and whether any
