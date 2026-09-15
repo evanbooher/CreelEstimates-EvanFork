@@ -105,20 +105,10 @@ SERIES_LABEL <- {
 ```
 
 `b` is the correction between what an index count sees and how many anglers are
-actually out there. Measuring it needs census (tie-in) counts. The question on
-the table is whether a `b` carried over from previous years can stand in for a
-measured one in a year where census counts are not collected -- and if it can,
+actually out there. Measuring it needs census (tie-in) counts. Our key question
+is whether a `b` carried over from previous years can stand in for a
+measured one in a year where census counts are not collected, and if it can,
 how much the catch estimate moves when that borrowed `b` is off.
-
-This brief covers **`r SERIES_LABEL`**. The mechanism below is general and the
-reliability check draws on all three basins, but the numbers in the table are
-`r SERIES_LABEL`'s own.
-
-**Catch moves one-for-one in the opposite direction from `b`.** Double `b` and
-the catch estimate is cut in half; halve `b` and it doubles; a `b` that is 10%
-too high pulls catch 10% too low. Estimated effort moves by exactly the same
-factor, so the catch **rate** -- fish per angler-hour -- does not change at all.
-`b` rescales the size of the fishery, not how well it is fishing.
 
 ::: {.callout-note collapse="true"}
 ## Why catch is proportional to 1/`b`
@@ -163,10 +153,6 @@ Effort is $E = \lambda \cdot L$, which carries the same $1/b_1$, so the catch
 rate $C/E = c$ is **unchanged** by $b$. That is why `b` rescales the fishery
 without changing the rate at which fish are caught.
 
-**With census**, $E_s \sim \text{Poisson}(\lambda)$ pins $\lambda$ directly,
-$b$ no longer has to absorb the difference, and the effect is smaller than
-shown here. The tables below are therefore the census-free case -- the scenario
-under discussion, and the larger of the two.
 :::
 
 ## How close a borrowed `b` gets
@@ -208,15 +194,14 @@ if (nrow(fv) > 0 && nrow(ft) > 0) cat(sprintf(
 ```
 
 Because catch tracks `b` one-for-one, those are also the errors carried straight
-into the catch estimate. **The vehicle term is accurate enough to borrow; the
-trailer term is not.**
+into the catch estimate.
 
 ## What the plausible range of `b` does to estimated catch
 
 Low and high below are the ends of the **95% prediction interval** for `b` in
-that series -- the range a new, unmeasured year is expected to fall in, worked
+that series. This is the range a new, unmeasured year is expected to fall in, worked
 out from the other years of that same fishery. They are not hypothetical round
-numbers; they are what `b` could actually be here.
+numbers; they are what `b` could actually be given what has been observed in the past.
 
 ```{r table}
 # The two index channels do not observe the same anglers. The vehicle count sees
@@ -272,24 +257,14 @@ wide |>
 ```
 
 Each bar spans what the catch estimate would be at the two ends of the plausible
-range for `b`. The right-hand end is the high `b` (catch revised down), the
-left-hand end the low `b` (catch revised up).
+range for `b`. The right-hand end is the high `b` (effort, and thus catch, revised down), the
+left-hand end the low `b` (effort, and thus, catch revised up).
 
-## What is not in this part
+## Follow up
 
-Season totals in fish, and the split between bank and boat, are being fitted
-now and follow in **part 2**. They do not change anything above -- the
-percentages hold for every species and catch group -- but they put the effect in
-fish, and they show how much of each fishery the trailer term can actually
-reach.
+Season total catch estimates by bank and boat gear strata, are being fitted
+now and follow in **part 2**. They do not change anything above, the
+percentages hold for every species and catch group, but they put the effect in
+fish, and will also help illustrate the magnitude of bank/boat angling effort and contextualize
+their respective b terms.
 
----
-
-*Method: `b` is the bias term on the effort index count in the BSS creel model;
-the derivation above is the one in the full report. Reliability figures are a
-leave-one-out backtest -- each year predicted from the other years of its series,
-never from an average containing itself. The catch effects shown are an upper
-bound: they assume no census counts at all, which is the scenario under
-discussion. In a year that does collect census, the census partly corrects an
-imported `b` and the effect is smaller. Full detail and code in
-`analysis/bss_bias/`.*
