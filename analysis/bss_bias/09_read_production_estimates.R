@@ -176,7 +176,16 @@ read_one <- function(row) {
   })
 }
 
-all_rows <- map_dfr(seq_len(nrow(meta)), ~read_one(meta[.x, ]))
+# gc() per folder on purpose. estimates_bss.rds runs to ~120 MB because
+# fw_creel calls fit_bss() without `pars=`, so extract() keeps every monitored
+# parameter, not just the handful read here. Nine of those inflate well past
+# the file size in memory; releasing each before the next is read keeps the
+# peak at one folder rather than all of them.
+all_rows <- map_dfr(seq_len(nrow(meta)), function(i) {
+  out <- read_one(meta[i, ])
+  gc(verbose = FALSE)
+  out
+})
 if (nrow(all_rows) == 0) cli::cli_abort("No usable estimates found.")
 
 # ------------------------------------------------------------------------------
