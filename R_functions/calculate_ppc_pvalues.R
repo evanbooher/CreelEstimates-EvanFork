@@ -1,6 +1,8 @@
 calculate_ppc_pvalues<- function(bss_fit, inputs_bss, ecg) {
   
-  extracted_data <- extract(bss_fit)
+  # rstan::extract, spelled out: tidyr::extract() is also on the search path via
+  # tidyverse, so the bare name resolves by library() order rather than intent.
+  extracted_data <- rstan::extract(bss_fit)
   ecg_inputs <- inputs_bss[[ecg]]
   
   # Lookup table mapping rep parameter names to their observed counterpart

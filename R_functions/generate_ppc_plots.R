@@ -1,6 +1,8 @@
 generate_ppc_plots<- function(bss_fit, inputs_bss, ecg, dwg, params) {
   
-  extracted_data <- extract(bss_fit)
+  # rstan::extract, spelled out: tidyr::extract() is also on the search path via
+  # tidyverse, so the bare name resolves by library() order rather than intent.
+  extracted_data <- rstan::extract(bss_fit)
   ecg_inputs     <- inputs_bss[[ecg]]
   
   # Parameter configuration lookup. Each entry encodes everything needed to

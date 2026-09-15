@@ -974,27 +974,44 @@ if (save_draws) {
   draws_array <- list()
 }
 
+# One definition of the fit, called with different chain/core counts: the real
+# run, and the one-chain diagnostic re-run below. `ecg` resolves from the loop
+# at call time.
+run_fit <- function(chains, cores) fit_bss(
+  model_file_name = params$bss_model_file_name,
+  bss_inputs_list = inputs_bss[[ecg]],
+  n_chain = chains,
+  n_cores = cores,
+  n_iter = 400,
+  n_warmup = 200,
+  n_thin = 1,
+  adapt_delta = 0.7,
+  max_treedepth = 12,
+  init = "0"
+)
+
+# stan() does NOT throw when every chain fails. It returns a stanfit with an
+# empty @sim, and the failure only shows up later as whatever the first
+# accessor does with it:
+#
+#   rstan::extract()            -> "stanfit object contains no samples"
+#   rstan::get_sampler_params() -> NULL, then "`x` must be a vector"
+#
+# Both of those are the same event -- no chain produced draws -- reported by
+# the accessor that happened to run first. Testing for it directly turns three
+# unrelated-looking downstream errors into one true statement.
+fit_has_draws <- function(f) {
+  isS4(f) && methods::.hasSlot(f, "sim") && length(f@sim) > 0 &&
+    !is.null(f@sim$samples) && length(f@sim$samples) > 0
+}
+
 for(ecg in names(inputs_bss)) {
   # fit the model to generate estimates
   #
   # Guarded so one catch group that cannot be fitted does not cost the other
   # one. A fishery with two groups spends roughly an hour per group; without
   # this, group 2 failing throws away group 1 as well.
-  ecg_fit <- try(
-    fit_bss(
-      model_file_name = params$bss_model_file_name,
-      bss_inputs_list = inputs_bss[[ecg]],
-      n_chain = 4,  
-      n_cores = 4,
-      n_iter = 400,
-      n_warmup = 200,
-      n_thin = 1,
-      adapt_delta = 0.7,
-      max_treedepth = 12,
-      init = "0"
-    ),
-    silent = FALSE
-  )
+  ecg_fit <- try(run_fit(4, 4), silent = FALSE)
   if (inherits(ecg_fit, "try-error")) {
     msg <- conditionMessage(attr(ecg_fit, "condition"))
     say("[FAIL] fit_bss FAILED for ", ecg,
@@ -1002,6 +1019,38 @@ for(ecg in names(inputs_bss)) {
         "unaffected. ", msg)
     failed_groups <- c(failed_groups, paste0(ecg, ": fit_bss -- ", msg))
     rm(ecg_fit); gc()
+    next
+  }
+
+  if (!fit_has_draws(ecg_fit)) {
+    say("[FAIL] ", ecg, ": the sampler returned no draws -- every chain failed.")
+
+    # WHY it failed is not recoverable from the empty fit, and on Windows
+    # rstan runs chains in a socket cluster where per-chain messages are
+    # discarded. One serial chain puts Stan's own text back on stdout, which
+    # capture.output() then lets us push to stderr past knitr's sink.
+    #
+    # Cheap: a fit that fails does so during initialization, in seconds.
+    say("[info] re-running ", ecg, " with ONE chain to surface Stan's message ...")
+    dbg_txt <- capture.output(
+      dbg_fit <- try(run_fit(1, 1), silent = TRUE),
+      type = "output"
+    )
+    dbg_msg <- if (inherits(dbg_fit, "try-error")) {
+      conditionMessage(attr(dbg_fit, "condition"))
+    } else if (!fit_has_draws(dbg_fit)) {
+      "one chain also produced no draws"
+    } else {
+      "one chain SUCCEEDED -- the four-chain run is the problem, not the data"
+    }
+    say("[stan] ", dbg_msg)
+    for (ln in utils::tail(dbg_txt, 60)) say("[stan] ", ln)
+
+    failed_groups <- c(
+      failed_groups,
+      paste0(ecg, ": sampler returned no draws -- ", dbg_msg)
+    )
+    suppressWarnings(rm(ecg_fit, dbg_fit, dbg_txt)); gc()
     next
   }
     
@@ -1016,7 +1065,11 @@ for(ecg in names(inputs_bss)) {
   # reads them, and this analysis exists to read C_sum/E_sum/b out of them. If
   # extraction fails there is nothing worth keeping for this group, so skip the
   # group rather than take down the render (and the OTHER group's fit with it).
-  ecg_keep$draws <- keep_try("extract(draws)", extract(ecg_fit))
+  #
+  # rstan::extract, spelled out. tidyr::extract() is also on the search path via
+  # tidyverse, and which one wins depends on library() order in the packages
+  # chunk -- not something this should depend on.
+  ecg_keep$draws <- keep_try("extract(draws)", rstan::extract(ecg_fit))
   if (is.null(ecg_keep$draws)) {
     say("[FAIL] No draws for ", ecg, " -- skipping this catch group.")
     failed_groups <- c(failed_groups, paste0(ecg, ": extract(draws) returned nothing"))
