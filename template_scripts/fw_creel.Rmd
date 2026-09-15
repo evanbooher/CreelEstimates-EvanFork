@@ -872,7 +872,33 @@ inputs_bss <-
         value_normal_sigma_omega_E_0 = 3,
         value_lognormal_sigma_b = 1,
         value_normal_sigma_B1 = 5,  
-        value_normal_mu_mu_C = log(0.02),
+        # Catch-rate prior centred on the rate actually observed for THIS catch
+        # group, rather than a fixed log(0.02). fish_count is the group's fish
+        # per interview and fishing_time_total is person-hours, so the ratio is
+        # in the same units as lambda_C.
+        #
+        # Falls back to log(0.02) when the empirical rate is not usable: zero
+        # fish gives log(0) = -Inf and zero hours gives NaN, and Stan hard-errors
+        # on any non-finite value in `data`. The fallback keeps a thin group
+        # fitting rather than killing the render, and the message says which was
+        # used so a prior-driven result is not mistaken for an empirical one.
+        value_normal_mu_mu_C = {
+          cg  <- dwg_summ_bss$interview |> dplyr::filter(est_cg == .x)
+          emp <- sum(cg$fish_count, na.rm = TRUE) / sum(cg$fishing_time_total, na.rm = TRUE)
+          if (is.finite(emp) && emp > 0) {
+            cli::cli_alert_info(
+              "{.x}: catch-rate prior centred on the observed {signif(emp, 3)} fish/person-hour."
+            )
+            log(emp)
+          } else {
+            cli::cli_alert_warning(
+              "{.x}: no usable observed catch rate ({sum(cg$fish_count, na.rm = TRUE)} fish / \
+               {round(sum(cg$fishing_time_total, na.rm = TRUE))} person-hours) -- \
+               falling back to the default log(0.02)."
+            )
+            log(0.02)
+          }
+        },
         value_normal_sigma_mu_C = 1.5,  
         value_normal_mu_mu_E = log(5),
         value_normal_sigma_mu_E = 2,  
