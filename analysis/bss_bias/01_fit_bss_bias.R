@@ -584,14 +584,14 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   #
   # trim_to_last_sampled is NOT applied here: it needs dwg, which is fetched
   # below. It runs after the section restriction, further down.
-  .win <- fishery_window_limit(fishery_name)
-  if (!is.null(.win)) {
+  win_lim <- fishery_window_limit(fishery_name)
+  if (!is.null(win_lim)) {
     cli::cli_alert_info(
-      "  Window scope: {.val {.win$est_date_start}} to {.val {.win$est_date_end}} \\
+      "  Window scope: {.val {win_lim$est_date_start}} to {.val {win_lim$est_date_end}} \\
        (lookup gave {.val {est_dates$est_date_start}} to {.val {est_dates$est_date_end}})."
     )
-    est_dates$est_date_start <- .win$est_date_start
-    est_dates$est_date_end   <- .win$est_date_end
+    est_dates$est_date_start <- win_lim$est_date_start
+    est_dates$est_date_end   <- win_lim$est_date_end
   }
 
   date_start <- suppressWarnings(as.Date(est_dates$est_date_start))
@@ -611,23 +611,23 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   # Trailing unsampled days carry no index counts, so they do not inform `b`
   # directly -- but they sit in prep_days()'s grid and inflate the season totals
   # that `b` is used to rescale.
-  if (!is.null(.win) && isTRUE(.win$trim_to_last_sampled)) {
-    .sampled <- c(
+  if (!is.null(win_lim) && isTRUE(win_lim$trim_to_last_sampled)) {
+    sampled_dates <- c(
       suppressWarnings(as.Date(dwg$effort$event_date)),
       suppressWarnings(as.Date(dwg$interview$event_date))
     )
-    .sampled <- .sampled[!is.na(.sampled) & .sampled <= date_end]
-    if (length(.sampled) == 0) {
+    sampled_dates <- sampled_dates[!is.na(sampled_dates) & sampled_dates <= date_end]
+    if (length(sampled_dates) == 0) {
       skip_fishery("Nothing sampled within the restricted window.", stage = "trim_window")
     }
-    .last <- max(.sampled)
-    if (.last < date_end) {
+    last_sampled <- max(sampled_dates)
+    if (last_sampled < date_end) {
       cli::cli_alert_info(
-        "  Window trimmed to last sampled date: {.val {as.character(.last)}} \\
-         ({as.integer(date_end - .last)} unsampled days removed)."
+        "  Window trimmed to last sampled date: {.val {as.character(last_sampled)}} \\
+         ({as.integer(date_end - last_sampled)} unsampled days removed)."
       )
-      date_end <- .last
-      est_dates$est_date_end <- as.character(.last)
+      date_end <- last_sampled
+      est_dates$est_date_end <- as.character(last_sampled)
     }
   }
 

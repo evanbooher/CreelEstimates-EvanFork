@@ -996,18 +996,25 @@ inputs_bss <-
         # fitting rather than killing the render, and the message says which was
         # used so a prior-driven result is not mistaken for an empirical one.
         value_normal_mu_mu_C = {
-          cg  <- dwg_summ_bss$interview |> dplyr::filter(est_cg == .x)
+          # ecg_name, not {.x} directly: cli >= 3.4 reads a {} expression
+          # starting with a dot as a STYLE, so "{.x}" resolves to an unknown
+          # style and is dropped -- the message then prints without the catch
+          # group it exists to name. Silent, unlike the error you get for
+          # something cli cannot parse as a style name at all.
+          ecg_name <- .x
+          cg  <- dwg_summ_bss$interview |> dplyr::filter(est_cg == ecg_name)
           emp <- sum(cg$fish_count, na.rm = TRUE) / sum(cg$fishing_time_total, na.rm = TRUE)
           if (is.finite(emp) && emp > 0) {
             cli::cli_alert_info(
-              "{.x}: catch-rate prior centred on the observed {signif(emp, 3)} fish/person-hour."
+              "{ecg_name}: catch-rate prior centred on the observed {signif(emp, 3)} fish/person-hour."
             )
             log(emp)
           } else {
+            n_fish  <- sum(cg$fish_count, na.rm = TRUE)
+            n_hours <- round(sum(cg$fishing_time_total, na.rm = TRUE))
             cli::cli_alert_warning(
-              "{.x}: no usable observed catch rate ({sum(cg$fish_count, na.rm = TRUE)} fish / \
-               {round(sum(cg$fishing_time_total, na.rm = TRUE))} person-hours) -- \
-               falling back to the default log(0.02)."
+              "{ecg_name}: no usable observed catch rate ({n_fish} fish / \
+               {n_hours} person-hours) -- falling back to the default log(0.02)."
             )
             log(0.02)
           }
@@ -1670,7 +1677,10 @@ ppc_coverage_combined <- purrr::map_df(
   ~{
     p_fit <- estimates_bss[[.x]]$ppc_results$p_fit
     if (is.null(p_fit)) {
-      cli::cli_alert_info("Skipping PPC coverage summary for catch group {.x}: no PPC results (likely NaN generated quantities from low catch data).")
+      # {ecg_name} not {.x}: see the note in prep_inputs_bss -- cli drops a
+      # dot-leading expression as an unknown style, so {.x} printed nothing.
+      ecg_name <- .x
+      cli::cli_alert_info("Skipping PPC coverage summary for catch group {ecg_name}: no PPC results (likely NaN generated quantities from low catch data).")
       return(NULL)
     }
     p_fit |>
