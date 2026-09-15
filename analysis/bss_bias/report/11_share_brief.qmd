@@ -1,0 +1,136 @@
+---
+title: "Effort-index bias (`b`) and estimated catch"
+subtitle: "Skagit / Snohomish / Stillaguamish freshwater creel"
+date: today
+format:
+  html:
+    embed-resources: true
+    toc: false
+    theme: cosmo
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(tidyverse)
+library(gt)
+library(here)
+
+OUT_DIR <- here::here("analysis", "bss_bias", "outputs")
+source(here::here("analysis", "bss_bias", "common.R"))
+
+need <- function(f) {
+  p <- file.path(OUT_DIR, f)
+  if (!file.exists(p)) stop(f, " not found -- run 07_catch_sensitivity.R first.", call. = FALSE)
+  readr::read_csv(p, show_col_types = FALSE)
+}
+
+T7  <- need("bss_b_T7_direct_sensitivity.csv")
+cal <- need("bss_b_T6_calibration.csv")
+
+# est_cg is the full species_lifestage_finmark_fate string. Collaborators do
+# not need to read a regex, so it is labelled by target species.
+group_label <- function(x) {
+  dplyr::case_when(
+    stringr::str_starts(x, "Chinook") ~ "Chinook encounters",
+    stringr::str_starts(x, "Coho")    ~ "Coho harvest",
+    is.na(x)                          ~ NA_character_,
+    TRUE                              ~ stringr::str_extract(x, "^[^_]+")
+  )
+}
+
+# One row per fishery-year x b term x catch group: what the fit produced, and
+# what it would have been at the low and high ends of that series' own
+# plausible range for b.
+wide <- T7 |>
+  filter(tier_kind %in% c("anchor", "empirical")) |>
+  mutate(group = group_label(est_cg)) |>
+  select(fishery_name, year_start, bias_type, group, tier, catch_estimate, pct_change_catch) |>
+  pivot_wider(names_from = tier, values_from = c(catch_estimate, pct_change_catch)) |>
+  transmute(
+    fishery_name, year_start, bias_type, group,
+    fitted    = `catch_estimate_as fitted`,
+    if_b_low  = `catch_estimate_series PI low`,
+    if_b_high = `catch_estimate_series PI high`,
+    pct_low   = `pct_change_catch_series PI low`,
+    pct_high  = `pct_change_catch_series PI high`
+  ) |>
+  filter(!is.na(fitted)) |>
+  arrange(fishery_name, group, bias_type)
+```
+
+Estimated catch scales inversely with `b`: a higher `b` means the index
+over-counts relative to anglers, so effort and catch are revised **down**, and
+a lower `b` revises them **up**. Effort moves by exactly the same factor, so the
+catch **rate** does not change — only the scale of the fishery.
+
+Using a predicted `b` instead of measuring one with census counts moves the
+catch estimate by the amounts below. Low and high are that series' own
+plausible range for `b`, taken from its history — not hypothetical values.
+
+```{r calibration-line, results = "asis"}
+v <- cal |> filter(bias_type == "vehicle")
+t <- cal |> filter(bias_type == "trailer")
+cat(sprintf(
+  paste0("Across %d held-out fishery-years, a predicted **vehicle** `b` would have been within ",
+         "**%.0f%%** of the measured value in the typical year (worst case %.0f%%). The ",
+         "**trailer** term is considerably less reliable: typically **%.0f%%**, worst case ",
+         "**%.0f%%**.\n"),
+  sum(cal$n_years_tested),
+  median(v$median_abs_pct_err), max(abs(v$worst_pct_err)),
+  median(t$median_abs_pct_err), max(abs(t$worst_pct_err))
+))
+```
+
+## What changing `b` does to estimated catch
+
+```{r table}
+wide |>
+  mutate(range = sprintf("%+.0f%% / %+.0f%%", pct_high, pct_low)) |>
+  select(fishery_name, group, bias_type, fitted, if_b_low, if_b_high, range) |>
+  gt(groupname_col = "fishery_name") |>
+  cols_label(
+    group     = "Catch group",
+    bias_type = "b term",
+    fitted    = "As fitted",
+    if_b_low  = "If b came in low",
+    if_b_high = "If b came in high",
+    range     = "Range"
+  ) |>
+  fmt_number(c(fitted, if_b_low, if_b_high), decimals = 0) |>
+  cols_align("right", c(fitted, if_b_low, if_b_high, range)) |>
+  tab_options(table.font.size = 13, data_row.padding = px(4),
+              row_group.font.weight = "bold") |>
+  tab_source_note("Fish. Low and high are the ends of that series' plausible range for b, from its own history.")
+```
+
+```{r figure, fig.width = 9, fig.height = 6}
+fig <- wide |>
+  mutate(label = paste0(fishery_name)) |>
+  ggplot(aes(y = fct_rev(factor(label)), color = bias_type)) +
+  geom_linerange(aes(xmin = if_b_high, xmax = if_b_low),
+                 position = position_dodge(width = 0.55), linewidth = 2.2, alpha = 0.9) +
+  geom_point(aes(x = fitted), position = position_dodge(width = 0.55),
+             size = 2.6, color = SURFACE) +
+  geom_point(aes(x = fitted), position = position_dodge(width = 0.55), size = 1.8) +
+  facet_wrap(~group, scales = "free_x") +
+  scale_x_continuous(labels = scales::comma) +
+  scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]), name = NULL) +
+  labs(title = "Estimated catch under the plausible range of b", x = "Fish", y = NULL) +
+  theme_bss()
+
+fig
+```
+
+The point is the estimate as fitted; the bar spans what it would be at the ends
+of that series' plausible range for `b`.
+
+---
+
+*Method: `b` is the bias term on the effort index count in the BSS creel model.
+Catch is effort x trip length x catch rate, and `b` enters only through effort,
+so catch is proportional to 1/`b`. Reliability figures are a leave-one-out
+backtest: each year predicted from the other years of its series, never from a
+mean containing itself. Full detail and code in `analysis/bss_bias/`.*
