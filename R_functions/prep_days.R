@@ -178,7 +178,14 @@ prep_days <- function(
         dplyr::select(section_num, event_date) |> 
         dplyr::mutate(open = FALSE)
       ,
-      by = c("section_num", "event_date")
+      by = c("section_num", "event_date"),
+      # closures.csv can name a section with a closure but zero interviews this
+      # fishery-year -- that section isn't in `sections` (unique interview
+      # section_nums), so it has no column to update here and no downstream
+      # estimation either. Default unmatched = "error" aborts the whole render
+      # on this; ignoring just drops the closure row for a section this year
+      # never samples.
+      unmatched = "ignore"
       ) |> 
       dplyr::arrange(section_num, event_date) |> 
       dplyr::mutate(section_num = paste0("open_section_", section_num)) |> 

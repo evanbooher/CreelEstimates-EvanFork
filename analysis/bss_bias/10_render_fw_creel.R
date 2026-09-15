@@ -19,7 +19,7 @@
 #   source("analysis/bss_bias/10_render_fw_creel.R")
 #
 #   Override before sourcing:
-#     RENDER_FISHERY_RE <- "Snohomish|Stillaguamish"   # regex over fishery_name
+#     RENDER_FISHERY_RE <- "^Stillaguamish salmon and gamefish 2022-23$" # regex over fishery_name
 #     RENDER_GROUPS     <- c("chinook_all", "coho_harvest")
 #     RENDER_PROJECT    <- "bss_bias"
 #     RENDER_SKIP_DONE  <- TRUE     # skip fishery-years that already have output
@@ -48,7 +48,7 @@ dir.create(REPORT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 source(here::here("analysis", "bss_bias", "catch_groups.R"))
 
-if (!exists("RENDER_FISHERY_RE", inherits = FALSE)) RENDER_FISHERY_RE <- "Snohomish|Stillaguamish"
+if (!exists("RENDER_FISHERY_RE", inherits = FALSE)) RENDER_FISHERY_RE <- "^Stillaguamish salmon and gamefish 2022-23$"
 if (!exists("RENDER_GROUPS",     inherits = FALSE)) RENDER_GROUPS     <- names(CATCH_GROUPS)
 if (!exists("RENDER_PROJECT",    inherits = FALSE)) RENDER_PROJECT    <- "bss_bias"
 if (!exists("RENDER_SKIP_DONE",  inherits = FALSE)) RENDER_SKIP_DONE  <- TRUE
@@ -288,12 +288,22 @@ if (length(targets) > 0) {
     }
 
     grps <- group_plan[[fn]]
-    p <- utils::modifyList(BASE_PARAMS, list(
-      fishery_name     = fn,
-      est_catch_groups = catch_groups_df(grps)
-    ))
+    # NOT folded into the modifyList() below: a data.frame IS a list in R, so
+    # modifyList() recurses into it column-by-column instead of replacing it
+    # wholesale. Assigning a narrowed (fewer-row) est_catch_groups into a
+    # column of BASE_PARAMS's (wider) one via `x[[v]] <- val[[v]]` recycles
+    # the shorter column to the original row count -- e.g. one real group
+    # narrowed down from the two-group default silently becomes TWO identical
+    # rows of that one group. That duplicated est_catch_groups row is what
+    # made prep_dwg_interview_catch() replicate every interview twice for a
+    # single-group fishery, which is exactly the mismatch ("dims declared=785,
+    # dims found=1788") that killed Stillaguamish 2025-26's coho_harvest fit.
+    p <- utils::modifyList(BASE_PARAMS, list(fishery_name = fn))
+    p$est_catch_groups <- catch_groups_df(grps)
     cli::cli_alert_info("Catch group{?s} for this render: {.val {grps}}")
     if (!is.null(RUN_PARAM_OVERRIDES[[fn]])) {
+      # Same hazard applies here if an override ever supplies est_catch_groups
+      # with a different row count than `p$est_catch_groups` above.
       p <- utils::modifyList(p, RUN_PARAM_OVERRIDES[[fn]])
     }
 

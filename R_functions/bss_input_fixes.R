@@ -248,6 +248,36 @@ apply_bss_input_fixes <- function(dwg_summ, days, fishery_name) {
 # ------------------------------------------------------------------------------
 
 preflight_bss_inputs <- function(inputs_bss, fishery_name) {
+  # Declared-count vs. actual-length checks. Stan does not error when these
+  # disagree until sampling starts, and then only on the FIRST chain to touch
+  # the mismatched variable -- reported as "mismatch in dimension declared and
+  # found", with every chain otherwise returning silently with no draws and no
+  # R-level error. Catching it here names the variable and the fishery instead.
+  dim_checks <- list(
+    V_n   = c("day_V", "section_V", "countnum_V", "V_I"),
+    T_n   = c("day_T", "section_T", "countnum_T", "T_I"),
+    A_n   = c("day_A", "gear_A", "section_A", "countnum_A", "A_I"),
+    B_n   = c("day_B", "gear_B", "section_B", "countnum_B", "B_s"),
+    E_n   = c("day_E", "gear_E", "section_E", "countnum_E", "E_s"),
+    IntC  = c("day_IntC", "gear_IntC", "section_IntC", "c", "h"),
+    IntA  = c("day_IntA", "gear_IntA", "section_IntA", "V_A", "T_A", "B_A", "A_A")
+  )
+  for (dim_name in names(dim_checks)) {
+    declared <- inputs_bss[[dim_name]]
+    if (is.null(declared)) next
+    for (vec_name in dim_checks[[dim_name]]) {
+      actual <- length(inputs_bss[[vec_name]])
+      if (actual != declared) {
+        bss_fix_fail(
+          paste0(dim_name, " = ", declared, " but ", vec_name, " has length ", actual,
+                 ". A catch group or interview table upstream is duplicating or ",
+                 "dropping rows before this fishery's Stan data was assembled."),
+          stage = "bss_preflight"
+        )
+      }
+    }
+  }
+
   sec_idx <- unlist(inputs_bss[c("section_V", "section_T", "section_A", "section_E",
                                  "section_IntC", "section_IntA")], use.names = FALSE)
   sec_idx <- sec_idx[!is.na(sec_idx)]

@@ -1,6 +1,5 @@
 ---
 title: "Effort-index bias (`b`): what it does to estimated catch"
-subtitle: "Freshwater creel -- part 1 of 2"
 date: today
 params:
   focus: "Stillaguamish"
@@ -108,7 +107,7 @@ SERIES_LABEL <- {
 actually out there. Measuring it needs census (tie-in) counts. Our key question
 is whether a `b` carried over from previous years can stand in for a
 measured one in a year where census counts are not collected, and if it can,
-how much the catch estimate moves when that borrowed `b` is off.
+how much the catch estimate moves due to changes in `b`.
 
 ::: {.callout-note collapse="true"}
 ## Why catch is proportional to 1/`b`
@@ -155,53 +154,13 @@ without changing the rate at which fish are caught.
 
 :::
 
-## How close a borrowed `b` gets
-
-```{r calibration-line, results = "asis"}
-# Deliberately NOT subset to FOCUS_RE -- see the note in the setup chunk. How
-# well the method predicts is scored on every series, then the focal basin's own
-# rows are reported inside that.
-v <- cal |> filter(bias_type == "vehicle")
-t <- cal |> filter(bias_type == "trailer")
-cat(sprintf(
-  paste0("Each fishery-year with a measured `b` was predicted from the **other** years of ",
-         "its own series and nothing else, then compared against what was actually ",
-         "measured -- %d such tests across the three basins. A predicted **vehicle** `b` ",
-         "landed within **%.0f%%** of the measured value in the typical year, worst case ",
-         "%.0f%%. The **trailer** term is considerably less reliable: typically ",
-         "**%.0f%%** off, worst case **%.0f%%**.\n\n"),
-  sum(cal$n_years_tested),
-  median(v$median_abs_pct_err), max(abs(v$worst_pct_err)),
-  median(t$median_abs_pct_err), max(abs(t$worst_pct_err))
-))
-
-foc <- cal |> filter(str_detect(fishery_type, FOCUS_RE))
-fv  <- foc |> filter(bias_type == "vehicle")
-ft  <- foc |> filter(bias_type == "trailer")
-# A basin missing one of the two terms would otherwise print NA and -Inf into a
-# document going to co-managers. Say nothing rather than that.
-if (nrow(fv) > 0 && nrow(ft) > 0) cat(sprintf(
-  paste0("%s contributes %d of those tests. Its **vehicle** term came in ",
-         "inside the interval %d of %d times, typically **%.0f%%** off the measured ",
-         "value (worst %.0f%%); its **trailer** term %d of %d, typically **%.0f%%** off ",
-         "(worst %.0f%%).\n"),
-  SERIES_LABEL, sum(foc$n_years_tested),
-  sum(fv$n_inside_95_pi), sum(fv$n_years_tested),
-  median(fv$median_abs_pct_err), max(abs(fv$worst_pct_err)),
-  sum(ft$n_inside_95_pi), sum(ft$n_years_tested),
-  median(ft$median_abs_pct_err), max(abs(ft$worst_pct_err))
-))
-```
-
-Because catch tracks `b` one-for-one, those are also the errors carried straight
-into the catch estimate.
-
 ## What the plausible range of `b` does to estimated catch
 
 Low and high below are the ends of the **95% prediction interval** for `b` in
-that series. This is the range a new, unmeasured year is expected to fall in, worked
-out from the other years of that same fishery. They are not hypothetical round
-numbers; they are what `b` could actually be given what has been observed in the past.
+that series, based on an earlier part of this analysis.
+This can be interpreted as the range a new, unmeasured year could be expected to fall in, derived from
+other years of that same fishery. Essentially, they are what `b` could be given what has been observed
+in the past.
 
 ```{r table}
 # The two index channels do not observe the same anglers. The vehicle count sees
@@ -234,7 +193,7 @@ wide |>
     paste0("Change in estimated catch. The percentage is the same for every species and ",
            "catch group, because b moves effort and leaves the catch rate alone. ",
            "Vehicle rows move the whole fishery; trailer rows move the boat-caught ",
-           "portion, so their effect on the season total is smaller by however much of ",
+           "portion, so their effect on the season total differs by however much of ",
            "the fishery is fished from the bank.")
   )
 ```
@@ -260,11 +219,48 @@ Each bar spans what the catch estimate would be at the two ends of the plausible
 range for `b`. The right-hand end is the high `b` (effort, and thus catch, revised down), the
 left-hand end the low `b` (effort, and thus, catch revised up).
 
+## How close a borrowed `b` gets
+
+```{r calibration-line, results = "asis"}
+# Deliberately NOT subset to FOCUS_RE -- see the note in the setup chunk. How
+# well the method predicts is scored on every series, then the focal basin's own
+# rows are reported inside that.
+v <- cal |> filter(bias_type == "vehicle")
+t <- cal |> filter(bias_type == "trailer")
+cat(sprintf(
+  paste0("Each fishery-year with a measured `b` was predicted from the **other** years of ",
+         "its own series and nothing else, then compared against what was actually ",
+         "measured -- %d such tests across the three basins. A predicted **vehicle** `b` ",
+         "landed within **%.0f%%** of the measured value in the typical year, worst case ",
+         "%.0f%%. The **trailer** term is less reliable: typically ",
+         "**%.0f%%** off, worst case **%.0f%%**.\n\n"),
+  sum(cal$n_years_tested),
+  median(v$median_abs_pct_err), max(abs(v$worst_pct_err)),
+  median(t$median_abs_pct_err), max(abs(t$worst_pct_err))
+))
+
+foc <- cal |> filter(str_detect(fishery_type, FOCUS_RE))
+fv  <- foc |> filter(bias_type == "vehicle")
+ft  <- foc |> filter(bias_type == "trailer")
+# A basin missing one of the two terms would otherwise print NA and -Inf into a
+# document going to co-managers. Say nothing rather than that.
+if (nrow(fv) > 0 && nrow(ft) > 0) cat(sprintf(
+  paste0("%s contributes %d of those tests. Its **vehicle** term came in ",
+         "inside the interval %d of %d times, typically **%.0f%%** off the measured ",
+         "value (worst %.0f%%); its **trailer** term %d of %d, typically **%.0f%%** off ",
+         "(worst %.0f%%).\n"),
+  SERIES_LABEL, sum(foc$n_years_tested),
+  sum(fv$n_inside_95_pi), sum(fv$n_years_tested),
+  median(fv$median_abs_pct_err), max(abs(fv$worst_pct_err)),
+  sum(ft$n_inside_95_pi), sum(ft$n_years_tested),
+  median(ft$median_abs_pct_err), max(abs(ft$worst_pct_err))
+))
+```
+
 ## Follow up
 
 Season total catch estimates by bank and boat gear strata, are being fitted
-now and follow in **part 2**. They do not change anything above, the
-percentages hold for every species and catch group, but they put the effect in
+overnight. These updated results will put the effect in
 fish, and will also help illustrate the magnitude of bank/boat angling effort and contextualize
 their respective b terms.
 

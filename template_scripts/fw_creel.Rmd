@@ -304,7 +304,16 @@ dwg$days <- prep_days(
   lat = mean(dwg$ll$centroid_lat), #can/should consider smarter options
   long = mean(dwg$ll$centroid_lon),#can/should consider smarter options 
   period_pe = params$period_pe,
-  sections = unique(dwg$interview$section_num),
+  # Interview sections alone can miss a section that carries CENSUS/INDEX
+  # effort counts but had zero completed interviews that fishery-year --
+  # align_bss_sections() sizes S off effort_census, not interviews. Building
+  # the day grid (and therefore closures/open_section_* columns) off
+  # interview sections only then leaves that section's column missing, which
+  # align_bss_sections() catches with skip_fishery() -- correct, but it drops
+  # the WHOLE fishery-year rather than just the affected section. Union with
+  # effort's sections here so the grid already spans everywhere effort was
+  # counted, not just everywhere someone was interviewed.
+  sections = sort(unique(c(dwg$interview$section_num, dwg$effort$section_num))),
   closures = dwg$closures,
   day_length = params$day_length_expansion,
   day_length_inputs = day_length_inputs
@@ -982,8 +991,8 @@ run_fit <- function(chains, cores) fit_bss(
   bss_inputs_list = inputs_bss[[ecg]],
   n_chain = chains,
   n_cores = cores,
-  n_iter = 400,
-  n_warmup = 200,
+  n_iter = 1000,
+  n_warmup = 500,
   n_thin = 1,
   adapt_delta = 0.7,
   max_treedepth = 12,
