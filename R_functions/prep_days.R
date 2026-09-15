@@ -164,28 +164,60 @@ prep_days <- function(
 
   # expanding join to incorporate closure dates 
   
+  # Every (section, date) the fishery could be open on.
+  open_grid <- tidyr::expand_grid(
+    event_date = days$event_date, section_num = sections, open = TRUE
+  )
+
+  closure_rows <- closures |>
+    mutate(
+      event_date  = as.Date(event_date, format = "%Y-%m-%d"),
+      section_num = as.double(section_num)
+    ) |>
+    dplyr::filter(dplyr::between(event_date, date_begin, date_end)) |>
+    dplyr::select(section_num, event_date) |>
+    dplyr::mutate(open = FALSE)
+
+  # rows_update() ERRORS on any closure whose (section, date) is not already in
+  # the grid, which took down Stillaguamish 2022-23 with "`y` must contain keys
+  # that already exist in `x`" and no indication of which keys or why.
+  #
+  # Two very different things produce an unmatched closure, and they must not be
+  # treated alike:
+  #
+  #   * A date the fishery is not being estimated over. Harmless -- a closure
+  #     outside the window is simply irrelevant -- and expected wherever the
+  #     closure table is maintained by calendar year.
+  #   * A SECTION NUMBER that is not in `sections`. That is a numbering
+  #     mismatch, and dropping it silently would leave a closed section looking
+  #     open for the whole season. Loud.
+  unmatched <- dplyr::anti_join(closure_rows, open_grid,
+                                by = c("section_num", "event_date"))
+  if (nrow(unmatched) > 0) {
+    bad_sections <- sort(setdiff(unique(unmatched$section_num), sections))
+    if (length(bad_sections) > 0) {
+      cli::cli_alert_danger(
+        "prep_days: {nrow(unmatched)} closure row{?s} name section{?s} \
+         {.val {bad_sections}}, which {?is/are} not among the sections being \
+         estimated ({.val {sections}}). Those closures are DROPPED, so those \
+         sections will be treated as open all season. Check the section \
+         numbering in the closure table against the fishery's sections."
+      )
+    }
+    n_date_only <- nrow(dplyr::filter(unmatched, section_num %in% sections))
+    if (n_date_only > 0) {
+      cli::cli_alert_info(
+        "prep_days: {n_date_only} closure row{?s} fall on date{?s} outside the \
+         days being estimated -- ignored."
+      )
+    }
+    closure_rows <- dplyr::semi_join(closure_rows, open_grid,
+                                     by = c("section_num", "event_date"))
+  }
+
   days <- left_join(
     days,
     dplyr::rows_update(
-      tidyr::expand_grid(event_date = days$event_date, section_num = sections, open = TRUE)
-      ,
-      closures |>
-        mutate(
-          event_date = as.Date(event_date, format="%Y-%m-%d"),
-          section_num = as.double(section_num)
-          ) |> 
-        dplyr::filter(dplyr::between(event_date, date_begin, date_end)) |> 
-        dplyr::select(section_num, event_date) |> 
-        dplyr::mutate(open = FALSE)
-      ,
-      by = c("section_num", "event_date"),
-      # closures.csv can name a section with a closure but zero interviews this
-      # fishery-year -- that section isn't in `sections` (unique interview
-      # section_nums), so it has no column to update here and no downstream
-      # estimation either. Default unmatched = "error" aborts the whole render
-      # on this; ignoring just drops the closure row for a section this year
-      # never samples.
-      unmatched = "ignore"
       ) |> 
       dplyr::arrange(section_num, event_date) |> 
       dplyr::mutate(section_num = paste0("open_section_", section_num)) |> 
