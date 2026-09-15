@@ -935,14 +935,40 @@ save_draws <- isTRUE(params$save_draws)
 estimates_bss <- list()
 diagnostics_bss <- list()
 convergence_tables <- list()
+
+# Called after each catch group completes and again at the end of the loop, so
+# a failure while fitting group 2 cannot take group 1's finished fit with it.
+save_bss_outputs <- function() {
+  saveRDS(estimates_bss, file.path(outputs_folders$outputs, "estimates_bss.rds"))
+  saveRDS(diagnostics_bss, file.path(outputs_folders$outputs, "diagnostics_bss.rds"))
+  saveRDS(convergence_tables, file.path(outputs_folders$outputs, "convergence_tables.rds"))
+}
+
+# Guards a post-fit SUMMARY. The fit is complete by the time any of these run,
+# so a summary that cannot be built costs that summary and nothing else.
+# Defined here rather than inside the loop so the whole chunk can use it.
+keep_try <- function(label, expr) {
+  out <- try(expr, silent = TRUE)
+  if (inherits(out, "try-error")) {
+    cli::cli_alert_warning(
+      "{label} failed for {ecg} -- the fit is unaffected. {conditionMessage(attr(out, 'condition'))}"
+    )
+    return(NULL)
+  }
+  out
+}
 if (save_draws) {
   draws_bss <- list()
   draws_array <- list()
 }
 
 for(ecg in names(inputs_bss)) {
-  # fit the model to generate estimates 
-  ecg_fit <-
+  # fit the model to generate estimates
+  #
+  # Guarded so one catch group that cannot be fitted does not cost the other
+  # one. A fishery with two groups spends roughly an hour per group; without
+  # this, group 2 failing throws away group 1 as well.
+  ecg_fit <- try(
     fit_bss(
       model_file_name = params$bss_model_file_name,
       bss_inputs_list = inputs_bss[[ecg]],
@@ -954,52 +980,59 @@ for(ecg in names(inputs_bss)) {
       adapt_delta = 0.7,
       max_treedepth = 12,
       init = "0"
+    ),
+    silent = FALSE
+  )
+  if (inherits(ecg_fit, "try-error")) {
+    cli::cli_alert_danger(
+      "fit_bss FAILED for {ecg} -- skipping this catch group; any other group in this \
+       fishery is unaffected. {conditionMessage(attr(ecg_fit, 'condition'))}"
     )
+    rm(ecg_fit); gc()
+    next
+  }
     
   ## extract and summarize estimates and model fit statistics 
   ecg_keep <- list()
-  # Each of these is a post-fit SUMMARY. The fit is already complete by the time
-  # they run, and estimates_bss.rds is not written until the end of this chunk,
-  # so any one of them throwing has always destroyed a finished fit -- which is
-  # exactly what get_bss_overview() did at four chains. Individually guarded:
-  # a summary that cannot be built costs that summary, nothing else.
-  keep_try <- function(label, expr) {
-    out <- try(expr, silent = TRUE)
-    if (inherits(out, "try-error")) {
-      cli::cli_alert_warning(
-        "{label} failed for {ecg} -- the fit is unaffected. {conditionMessage(attr(out, 'condition'))}"
-      )
-      return(NULL)
-    }
-    out
-  }
   ecg_keep$overview <- keep_try("get_bss_overview", get_bss_overview(bss_fit = ecg_fit, ecg = ecg))
   ecg_keep$cpue_daily <- keep_try("get_bss_cpue_daily", get_bss_cpue_daily(bss_fit = ecg_fit, ecg = ecg, dwg = dwg))
   ecg_keep$catch_daily <- keep_try("get_bss_catch_daily", get_bss_catch_daily(bss_fit = ecg_fit, ecg = ecg, dwg = dwg))
   ecg_keep$effort_daily <- keep_try("get_bss_effort_daily", get_bss_effort_daily(bss_fit = ecg_fit, ecg = ecg, dwg = dwg))
   
-  # Always extract draws for use in diagnostics and plots
-  ecg_keep$draws <- extract(ecg_fit)
-  
-  # ---- NEW: Prepare season results and create density plot ----
-  ecg_keep$season_results <- get_bss_season_results(ecg_keep$draws, ecg)
-  # Skipped under fit_only: a plot nothing will render, and one more thing that
-  # can fail between a completed fit and it being written to disk.
-  ecg_keep$density_plot <- if (isTRUE(params$fit_only)) NULL else
-    create_bss_density_plot(ecg_keep$season_results, ecg)
-  
-  ecg_keep$summary <- summary(ecg_fit)$summary
-  ecg_keep$ppc_values <- calculate_ppc_pvalues(
+  # Draws are the one thing that is NOT optional -- every downstream consumer
+  # reads them, and this analysis exists to read C_sum/E_sum/b out of them. If
+  # extraction fails there is nothing worth keeping for this group, so skip the
+  # group rather than take down the render (and the OTHER group's fit with it).
+  ecg_keep$draws <- keep_try("extract(draws)", extract(ecg_fit))
+  if (is.null(ecg_keep$draws)) {
+    cli::cli_alert_danger("No draws for {ecg} -- skipping this catch group.")
+    rm(ecg_fit); gc()
+    next
+  }
+
+  # ---- Prepare season results and create density plot ----
+  # All of the following are SUMMARIES AND PLOTS built from a fit that is
+  # already complete. None of them is worth the fit. Each is guarded so a
+  # failure costs that one summary and nothing else -- this is the same lesson
+  # get_bss_overview() taught, applied to the rest of the block rather than to
+  # the four accessors that happened to break first.
+  ecg_keep$season_results <- keep_try(
+    "get_bss_season_results", get_bss_season_results(ecg_keep$draws, ecg))
+  ecg_keep$density_plot <- if (isTRUE(params$fit_only) || is.null(ecg_keep$season_results)) NULL else
+    keep_try("create_bss_density_plot", create_bss_density_plot(ecg_keep$season_results, ecg))
+
+  ecg_keep$summary <- keep_try("summary(fit)", summary(ecg_fit)$summary)
+  ecg_keep$ppc_values <- keep_try("calculate_ppc_pvalues", calculate_ppc_pvalues(
     bss_fit = ecg_fit, 
     inputs_bss = inputs_bss, 
-    ecg = ecg)
+    ecg = ecg))
   
-  invisible(ecg_keep$ppc_results <- generate_ppc_plots(
+  invisible(ecg_keep$ppc_results <- keep_try("generate_ppc_plots", generate_ppc_plots(
     bss_fit = ecg_fit, 
     inputs_bss = inputs_bss, 
     ecg = ecg,
     dwg = dwg, 
-    params = params))
+    params = params)))
   
   ## store estimates and model fit
   estimates_bss[[ecg]] <- ecg_keep
@@ -1092,18 +1125,29 @@ for(ecg in names(inputs_bss)) {
   cli::cli_alert_success("Model run completed for catch group: {ecg}\n")
   
   # extract and generate model diagnostics
+  # Same rule as above: printed diagnostics about a finished fit must not be
+  # able to destroy it. get_hmc_diagnostics() in particular reads the sampler
+  # params, which is exactly what returned NULL on a degenerate fit before.
   diagnostics_keep <- list()
-  diagnostics_keep$bss_runtime_cg <- creelutils::get_bss_runtime(ecg_fit)
+  diagnostics_keep$bss_runtime_cg <- keep_try("get_bss_runtime", creelutils::get_bss_runtime(ecg_fit))
   cat("\n")
   cli::cli_rule()
   
-  diagnostics_keep$bss_hmc_diagnostic_cg <- capture.output(creelutils::get_hmc_diagnostics(stan_fit = ecg_fit))
-  cat(diagnostics_keep$bss_hmc_diagnostic_cg, sep = "\n")
+  diagnostics_keep$bss_hmc_diagnostic_cg <- keep_try(
+    "get_hmc_diagnostics",
+    capture.output(creelutils::get_hmc_diagnostics(stan_fit = ecg_fit)))
+  if (!is.null(diagnostics_keep$bss_hmc_diagnostic_cg)) {
+    cat(diagnostics_keep$bss_hmc_diagnostic_cg, sep = "\n")
+  }
   cat("\n")
   cli::cli_rule()
   
-  diagnostics_keep$bss_settings_cg <- get_bss_settings(ecg, ecg_fit, inputs_bss, print = TRUE) |> capture.output()
-  cat(diagnostics_keep$bss_settings_cg, sep = "\n")
+  diagnostics_keep$bss_settings_cg <- keep_try(
+    "get_bss_settings",
+    get_bss_settings(ecg, ecg_fit, inputs_bss, print = TRUE) |> capture.output())
+  if (!is.null(diagnostics_keep$bss_settings_cg)) {
+    cat(diagnostics_keep$bss_settings_cg, sep = "\n")
+  }
 
   # trace plots
   trace_pars <- c(
@@ -1160,33 +1204,46 @@ for(ecg in names(inputs_bss)) {
 
   # Save the traceplot (skipped when NaN draws prevented any plot from being built)
   if (!is.null(diagnostics_keep$traceplots)) {
-    save_plot(
+    keep_try("save_plot(traceplot)", save_plot(
       diagnostics_keep$traceplots,
       paste0("traceplot_", safe_name, ".png"),
       width = 12,
       height = 10
-    )
+    ))
   } else {
     cli::cli_alert_info("Skipping traceplot save for catch group {ecg} (no plot available).")
   }
 
   diagnostics_bss[[ecg]] <- diagnostics_keep
-  
+
+  # WRITE AFTER EVERY GROUP, not once at the end of the loop. A fishery with
+  # two catch groups spends ~an hour on the first; if the second one throws
+  # anywhere above, a single save at the bottom means BOTH are lost. Rewriting
+  # the same three files per group is cheap next to that.
+  save_bss_outputs()
+
   # Additional memory cleanup - remove fit object after extracting what we need
   rm(ecg_fit)
   gc()
 }
 
-# Save BSS estimates and diagnostics
-saveRDS(estimates_bss, file.path(outputs_folders$outputs, "estimates_bss.rds"))
-saveRDS(diagnostics_bss, file.path(outputs_folders$outputs, "diagnostics_bss.rds"))
-saveRDS(convergence_tables, file.path(outputs_folders$outputs, "convergence_tables.rds"))
+# Final write. save_bss_outputs() has already run once per completed group, so
+# this is a no-op in the ordinary case and the safety net when the loop body
+# never reached its own call.
+save_bss_outputs()
 
 # ---- NEW: Combine and save density plots ----
-density_plots <- map(estimates_bss, ~.$density_plot)
-combined_density_plot <- if (isTRUE(params$fit_only)) NULL else
-  save_bss_density_plots(density_plots, outputs_folders)
-cli::cli_alert_success("Density plots saved")
+density_plots <- map(estimates_bss, ~.$density_plot) |> purrr::compact()
+combined_density_plot <- if (isTRUE(params$fit_only) || length(density_plots) == 0) NULL else
+  try(save_bss_density_plots(density_plots, outputs_folders), silent = TRUE)
+if (inherits(combined_density_plot, "try-error")) {
+  combined_density_plot <- NULL
+  cli::cli_alert_warning("Combined density plot failed -- estimates are already saved.")
+} else if (is.null(combined_density_plot)) {
+  cli::cli_alert_info("No density plots to combine.")
+} else {
+  cli::cli_alert_success("Density plots saved")
+}
 
 # Conditionally save draws if requested
 if (save_draws) {

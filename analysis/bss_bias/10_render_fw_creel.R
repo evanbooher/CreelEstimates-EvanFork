@@ -211,6 +211,21 @@ if (length(targets) > 0) {
   # output files.
   # --------------------------------------------------------------------------
 
+  ledger_file <- function() file.path(OUT_DIR, "bss_render_ledger.csv")
+
+  # Append-or-replace one row, keyed on fishery_name, so a re-run of one
+  # fishery updates its row rather than adding a second one.
+  write_ledger_row <- function(row) {
+    path <- ledger_file()
+    all <- if (file.exists(path)) {
+      prev <- read_csv(path, show_col_types = FALSE)
+      bind_rows(anti_join(prev, row, by = "fishery_name"), row)
+    } else {
+      row
+    }
+    write_csv(all, path)
+  }
+
   render_one <- function(fn) {
     cli::cli_h2("{fn}")
 
@@ -250,7 +265,7 @@ if (length(targets) > 0) {
       list(status = "error", error = conditionMessage(e))
     })
 
-    tibble(
+    row <- tibble(
       fishery_name = fn,
       status       = out$status,
       error        = out$error,
@@ -258,16 +273,17 @@ if (length(targets) > 0) {
       report       = file.path(REPORT_DIR, paste0(safe_name(fn), ".html")),
       rendered_at  = Sys.time()
     )
+
+    # Write the ledger after EVERY render, not once at the end of map_dfr.
+    # A sweep is hours long and gets interrupted; with a single write at the
+    # bottom, Ctrl-C loses the error messages for every render that already
+    # ran -- which is exactly why the last failure had to be diagnosed from a
+    # truncated console paste.
+    write_ledger_row(row)
+    row
   }
 
   ledger <- map_dfr(targets, render_one)
-
-  ledger_path <- file.path(OUT_DIR, "bss_render_ledger.csv")
-  if (file.exists(ledger_path)) {
-    prev <- read_csv(ledger_path, show_col_types = FALSE)
-    ledger <- bind_rows(anti_join(prev, ledger, by = "fishery_name"), ledger)
-  }
-  write_csv(ledger, ledger_path)
 
   cli::cli_h2("Result")
   ledger |> select(fishery_name, status, runtime_min) |> print(n = Inf)
