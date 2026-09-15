@@ -50,16 +50,26 @@ wide <- T7 |>
   # pct_change_catch_total, not pct_change_catch: the first is the change in
   # the whole fishery's catch, which is what a reader quotes. They differ for
   # trailer, where only the boat component moves.
-  select(fishery_name, year_start, bias_type, group, tier,
+  # Pivot on a short stable key, not the display label: the labels are written
+  # for the reader and will be reworded, and column names should not move when
+  # they are.
+  mutate(tier_kind_label = case_when(
+    tier_kind == "anchor"                    ~ "fitted",
+    str_detect(tier, "^low end")             ~ "low",
+    str_detect(tier, "^high end")            ~ "high",
+    TRUE                                     ~ NA_character_
+  )) |>
+  filter(!is.na(tier_kind_label)) |>
+  select(fishery_name, year_start, bias_type, group, tier_kind_label,
          catch_estimate, pct_change_catch = pct_change_catch_total) |>
-  pivot_wider(names_from = tier, values_from = c(catch_estimate, pct_change_catch)) |>
+  pivot_wider(names_from = tier_kind_label, values_from = c(catch_estimate, pct_change_catch)) |>
   transmute(
     fishery_name, year_start, bias_type, group,
-    fitted    = `catch_estimate_as fitted`,
-    if_b_low  = `catch_estimate_series PI low`,
-    if_b_high = `catch_estimate_series PI high`,
-    pct_low   = `pct_change_catch_series PI low`,
-    pct_high  = `pct_change_catch_series PI high`
+    fitted    = catch_estimate_fitted,
+    if_b_low  = catch_estimate_low,
+    if_b_high = catch_estimate_high,
+    pct_low   = pct_change_catch_low,
+    pct_high  = pct_change_catch_high
   ) |>
   filter(!is.na(fitted)) |>
   arrange(fishery_name, group, bias_type)
@@ -120,8 +130,9 @@ under discussion, and the larger of the two.
 :::
 
 Using a predicted `b` instead of measuring one with census counts moves the
-catch estimate by the amounts below. Low and high are that series' own
-plausible range for `b`, taken from its history — not hypothetical values.
+catch estimate by the amounts below. Low and high are the ends of the **95% prediction interval** for `b` in that
+series: the range a new, unmeasured year is expected to fall in, estimated from
+the other years of that same fishery. Not hypothetical values.
 
 ```{r calibration-line, results = "asis"}
 v <- cal |> filter(bias_type == "vehicle")
@@ -148,15 +159,17 @@ wide |>
     group     = "Catch group",
     bias_type = "b term",
     fitted    = "As fitted",
-    if_b_low  = "If b came in low",
-    if_b_high = "If b came in high",
+    if_b_low  = "Low end of predicted b",
+    if_b_high = "High end of predicted b",
     range     = "Range"
   ) |>
   fmt_number(c(fitted, if_b_low, if_b_high), decimals = 0) |>
   cols_align("right", c(fitted, if_b_low, if_b_high, range)) |>
   tab_options(table.font.size = 13, data_row.padding = px(4),
               row_group.font.weight = "bold") |>
-  tab_source_note("Fish. Low and high are the ends of that series' plausible range for b, from its own history.")
+  tab_source_note(
+    "Fish. Low and high are the ends of the 95% prediction interval for b in that series -- the range a new, unmeasured year is expected to fall in, estimated from the other years of that fishery."
+  )
 ```
 
 ## Catch and effort by gear
@@ -169,7 +182,7 @@ between bank and boat is what sets how far each one reaches.
 t8_path <- file.path(OUT_DIR, "bss_b_T8_gear_split.csv")
 if (file.exists(t8_path)) {
   readr::read_csv(t8_path, show_col_types = FALSE) |>
-    filter(tier == "as fitted", bias_type == "vehicle") |>
+    filter(tier_kind == "anchor", bias_type == "vehicle") |>
     mutate(group = group_label(est_cg)) |>
     select(fishery_name, group, catch_bank, catch_boat, effort_bank, effort_boat) |>
     gt() |>

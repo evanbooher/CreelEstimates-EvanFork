@@ -157,6 +157,19 @@ LOO_MIN_SERIES_YEARS <- 3
 # value we have never seen. Added back by editing this line if asked.
 ROUND_LADDER <- c(0.5, 0.8, 1.0, 1.2, 1.5, 2.0)
 
+# Tier labels say what the value IS, because these reach tables read by people
+# who did not build the analysis. "PI low" tells a reader nothing; the wording
+# below tells them it is the bottom of a prediction interval and how wide that
+# interval is. Defined here because T5 uses them before T7 does.
+#
+# tier_kind is carried alongside these rather than parsed back out of the
+# label -- it used to be inferred with str_starts(tier, "series"), which ties
+# the analysis to the wording of a column heading.
+TIER_LOW    <- "low end of predicted b (95% PI)"
+TIER_MID    <- "predicted b (series mean)"
+TIER_HIGH   <- "high end of predicted b (95% PI)"
+TIER_FITTED <- "fitted b (this fishery-year)"
+
 # ------------------------------------------------------------------------------
 # Inputs
 # ------------------------------------------------------------------------------
@@ -359,7 +372,7 @@ ladder_emp <- T2 |>
   pivot_longer(c(pi_lb, pooled_b, pi_ub), names_to = "tier", values_to = "b_alt") |>
   mutate(
     framing = "empirical",
-    tier = recode(tier, pi_lb = "PI low", pooled_b = "predicted (pooled)", pi_ub = "PI high")
+    tier = recode(tier, pi_lb = TIER_LOW, pooled_b = TIER_MID, pi_ub = TIER_HIGH)
   ) |>
   left_join(T2 |> select(basin, fishery_type, bias_type, b_ref = pooled_b),
             by = c("basin", "fishery_type", "bias_type"))
@@ -414,28 +427,19 @@ series_bounds <- T2 |>
 # One row per fishery-year x bias type x tier.
 tier_grid <- b_fitted |>
   left_join(series_bounds, by = c("basin", "fishery_type", "bias_type")) |>
-  mutate(round_tiers = list(ROUND_LADDER)) |>
   rowwise() |>
-  mutate(b_values = list(c(
-    stats::setNames(ROUND_LADDER, paste0("b = ", ROUND_LADDER)),
-    stats::setNames(c(pi_lb, pooled_b, pi_ub),
-                    c("series PI low", "series predicted", "series PI high")),
-    stats::setNames(b_fitted, "as fitted")
+  mutate(tiers = list(tibble(
+    tier = c(paste0("b = ", ROUND_LADDER), TIER_LOW, TIER_MID, TIER_HIGH, TIER_FITTED),
+    tier_kind = c(rep("round", length(ROUND_LADDER)),
+                  "empirical", "empirical", "empirical", "anchor"),
+    b_alt = c(ROUND_LADDER, pi_lb, pooled_b, pi_ub, b_fitted)
   ))) |>
   ungroup() |>
-  select(-round_tiers) |>
-  mutate(tier = map(b_values, names), b_alt = map(b_values, unname)) |>
-  select(-b_values) |>
-  unnest(c(tier, b_alt)) |>
+  unnest(tiers) |>
   filter(!is.na(b_alt), b_alt > 0)
 
 T7 <- tier_grid |>
   mutate(
-    tier_kind = case_when(
-      tier == "as fitted"          ~ "anchor",
-      str_starts(tier, "series")   ~ "empirical",
-      TRUE                          ~ "round"
-    ),
     catch_multiplier = b_fitted / b_alt,
     pct_change_catch = 100 * (catch_multiplier - 1),
     direction = case_when(
@@ -607,7 +611,7 @@ if (!is.null(catch_base) && all(gear_cols_t8 %in% names(catch_base))) {
 
   cli::cli_h2("Catch and effort by gear, as fitted")
   T8 |>
-    filter(tier == "as fitted", bias_type == "vehicle") |>
+    filter(tier_kind == "anchor", bias_type == "vehicle") |>
     mutate(group = str_extract(est_cg, "^[^_]+"),
            boat_share = catch_boat / catch_total) |>
     select(fishery_name, group, catch_bank, catch_boat, boat_share,
@@ -832,7 +836,7 @@ fig17 <- ggplot(curve_df, aes(b_alt, catch_multiplier)) +
   scale_x_log10(breaks = c(0.3, 0.5, 0.8, 1, 1.25, 1.5, 2, 3)) +
   scale_y_log10(breaks = c(0.33, 0.5, 0.8, 1, 1.25, 2, 3)) +
   scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]), name = NULL) +
-  scale_shape_manual(values = c("PI low" = 1, "predicted (pooled)" = 19, "PI high" = 2), name = NULL) +
+  scale_shape_manual(values = setNames(c(1, 19, 2), c(TIER_LOW, TIER_MID, TIER_HIGH)), name = NULL) +
   labs(
     title = "Estimated catch moves as 1 / b",
     x = "Effort-index bias term b (log scale)",
