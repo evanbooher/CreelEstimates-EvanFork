@@ -219,7 +219,7 @@ without changing the rate at which fish are caught.
 
 :::
 
-## What the plausible range of `b` does to estimated catch
+## Effect of `b` on estimated catch across a plausible range 
 
 Low and high below are the ends of the **95% prediction interval** for `b` in
 that series, based on an earlier part of this analysis.
@@ -284,7 +284,7 @@ Each bar spans what the catch estimate would be at the two ends of the plausible
 range for `b`. The right-hand end is the high `b` (effort, and thus catch, revised down), the
 left-hand end the low `b` (effort, and thus, catch revised up).
 
-## How close a borrowed `b` gets
+## Estimated error in predicted `b` 
 
 ```{r calibration-line, results = "asis"}
 # Deliberately NOT subset to FOCUS_RE -- see the note in the setup chunk. How
@@ -364,14 +364,10 @@ as_fitted |>
   cols_align("right", c(catch_bank, catch_boat, catch_total,
                         effort_bank, effort_boat, boat_share_catch)) |>
   tab_options(table.font.size = 13, data_row.padding = px(4),
-              row_group.font.weight = "bold") |>
-  tab_source_note(
-    paste0("Posterior medians. Gear totals are the model's own -- the daily, ",
-           "section-level draws summed within gear, not a share applied afterwards.")
-  )
+              row_group.font.weight = "bold")
 ```
 
-```{r gear-math, eval = HAVE_FISH, results = "asis"}
+```{r gear-math, eval = FALSE, results = "asis"}
 cat(r"---(
 ::: {.callout-note collapse="true"}
 ## How the two terms divide the fishery between them
@@ -392,10 +388,13 @@ trailer equation pins boat effort and the vehicle equation then determines bank:
 $$
 rac{\lambda_{	ext{boat}}}{\lambda_{	ext{boat}}^{0}} = k_2,
 \qquad
-rac{\lambda_{	ext{bank}}}{\lambda_{	ext{bank}}^{0}} = k_1(1+ho) - ho\, k_2
+rac{\lambda_{	ext{bank}}}{\lambda_{	ext{bank}}^{0}} = k_1(1+
+ho) - 
+ho\, k_2
 $$
 
-where $ho = (R_{V2}/R_{V1})\cdot(\lambda_{	ext{boat}}^{0}/\lambda_{	ext{bank}}^{0})$
+where $
+ho = (R_{V2}/R_{V1})\cdot(\lambda_{	ext{boat}}^{0}/\lambda_{	ext{bank}}^{0})$
 is the boat-to-bank ratio of the vehicle count.
 
 Two things follow that the simpler treatment misses. Moving $b_1$ alone does
