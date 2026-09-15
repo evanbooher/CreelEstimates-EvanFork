@@ -1,6 +1,6 @@
 ---
-title: "Effort-index bias (`b`) and estimated catch"
-subtitle: "Skagit / Snohomish / Stillaguamish freshwater creel"
+title: "Effort-index bias (`b`): what it does to estimated catch"
+subtitle: "Skagit / Snohomish / Stillaguamish freshwater creel -- part 1 of 2"
 date: today
 format:
   html:
@@ -14,6 +14,19 @@ execute:
 ---
 
 ```{r setup}
+# ==============================================================================
+# PART 1 -- the mechanism and the reliability of a borrowed b.
+#
+# DELIBERATELY SELF-CONTAINED ON THE b DRAWS. This document reads T7 and the T6
+# calibration only, and touches NO season totals: not bss_catch_baseline.csv,
+# not catch_estimate, not the gear split. Everything here comes from the b
+# posteriors and the meta-analysis, both of which are complete.
+#
+# That is the point of the split. Part 1 can be sent without waiting on a model
+# sweep, and a stale or half-finished baseline sitting in outputs/ cannot leak
+# into it. Season totals in fish, and the bank/boat split, are part 2
+# (12_estimates_update.qmd) -- the complementary update, not a correction.
+# ==============================================================================
 library(tidyverse)
 library(gt)
 library(here)
@@ -30,58 +43,53 @@ need <- function(f) {
 T7  <- need("bss_b_T7_direct_sensitivity.csv")
 cal <- need("bss_b_T6_calibration.csv")
 
-# est_cg is the full species_lifestage_finmark_fate string. Collaborators do
-# not need to read a regex, so it is labelled by target species.
-group_label <- function(x) {
-  dplyr::case_when(
-    stringr::str_starts(x, "Chinook") ~ "Chinook encounters",
-    stringr::str_starts(x, "Coho")    ~ "Coho harvest",
-    is.na(x)                          ~ NA_character_,
-    TRUE                              ~ stringr::str_extract(x, "^[^_]+")
-  )
-}
-
-# One row per fishery-year x b term x catch group: what the fit produced, and
-# what it would have been at the low and high ends of that series' own
-# plausible range for b.
+# One row per fishery-year x b term: b as fitted, the ends of that series' own
+# plausible range, and the percent change in catch at each end.
+#
+# pct_change_catch, NOT pct_change_catch_total: the first is 100*(b_fitted/b_alt - 1),
+# which needs no season total. The second divides by C_sum and is NA until the
+# fits land -- it belongs to part 2.
+#
+# Pivot on a short stable key rather than the display label, so rewording a
+# label for the reader does not move a column name.
 wide <- T7 |>
   filter(tier_kind %in% c("anchor", "empirical")) |>
-  mutate(group = group_label(est_cg)) |>
-  # pct_change_catch_total, not pct_change_catch: the first is the change in
-  # the whole fishery's catch, which is what a reader quotes. They differ for
-  # trailer, where only the boat component moves.
-  # Pivot on a short stable key, not the display label: the labels are written
-  # for the reader and will be reworded, and column names should not move when
-  # they are.
-  mutate(tier_kind_label = case_when(
-    tier_kind == "anchor"                    ~ "fitted",
-    str_detect(tier, "^low end")             ~ "low",
-    str_detect(tier, "^high end")            ~ "high",
-    TRUE                                     ~ NA_character_
+  mutate(key = case_when(
+    tier_kind == "anchor"        ~ "fitted",
+    str_detect(tier, "^low end") ~ "low",
+    str_detect(tier, "^high end")~ "high",
+    TRUE                         ~ NA_character_
   )) |>
-  filter(!is.na(tier_kind_label)) |>
-  select(fishery_name, year_start, bias_type, group, tier_kind_label,
-         catch_estimate, pct_change_catch = pct_change_catch_total) |>
-  pivot_wider(names_from = tier_kind_label, values_from = c(catch_estimate, pct_change_catch)) |>
+  filter(!is.na(key)) |>
+  distinct(fishery_type, fishery_name, year_start, bias_type, key,
+           b_alt, pct_change_catch) |>
+  pivot_wider(names_from = key, values_from = c(b_alt, pct_change_catch)) |>
   transmute(
-    fishery_name, year_start, bias_type, group,
-    fitted    = catch_estimate_fitted,
-    if_b_low  = catch_estimate_low,
-    if_b_high = catch_estimate_high,
-    pct_low   = pct_change_catch_low,
-    pct_high  = pct_change_catch_high
+    fishery_type, fishery_name, year_start, bias_type,
+    b_fitted = b_alt_fitted,
+    b_low    = b_alt_low,
+    b_high   = b_alt_high,
+    pct_low  = pct_change_catch_low,     # b at the LOW end -> catch UP
+    pct_high = pct_change_catch_high     # b at the HIGH end -> catch DOWN
   ) |>
-  filter(!is.na(fitted)) |>
-  arrange(fishery_name, group, bias_type)
+  filter(!is.na(b_low), !is.na(b_high)) |>
+  arrange(fishery_type, year_start, bias_type)
 ```
 
-Estimated catch scales inversely with `b`: a higher `b` means the index
-over-counts relative to anglers, so effort and catch are revised **down**, and
-a lower `b` revises them **up**. Effort moves by exactly the same factor, so the
-catch **rate** does not change — only the scale of the fishery.
+`b` is the correction between what an index count sees and how many anglers are
+actually out there. Measuring it needs census (tie-in) counts. The question on
+the table is whether a `b` carried over from previous years can stand in for a
+measured one in a year where census counts are not collected -- and if it can,
+how much the catch estimate moves when that borrowed `b` is off.
+
+**Catch moves one-for-one in the opposite direction from `b`.** Double `b` and
+the catch estimate is cut in half; halve `b` and it doubles; a `b` that is 10%
+too high pulls catch 10% too low. Estimated effort moves by exactly the same
+factor, so the catch **rate** -- fish per angler-hour -- does not change at all.
+`b` rescales the size of the fishery, not how well it is fishing.
 
 ::: {.callout-note collapse="true"}
-## Why catch scales as 1/`b`
+## Why catch is proportional to 1/`b`
 
 Three observations enter the effort side of the model, and only one carries
 $b$ (notation as in the full report):
@@ -97,7 +105,7 @@ V_A &\sim \text{Binomial}\big(A_A,\; R_V\big)
 \end{aligned}
 $$
 
-**With no census**, the first line is absent and $\lambda$ — anglers present —
+**With no census**, the first line is absent and $\lambda$ -- anglers present --
 is pinned only by the index counts:
 
 $$
@@ -105,7 +113,7 @@ $$
 $$
 
 Catch is effort $\times$ trip length $\times$ catch rate, and the catch rate
-$c$ comes from the interviews alone — it never sees $b$:
+$c$ comes from the interviews alone -- it never sees $b$:
 
 $$
 C \;=\; \lambda \cdot L \cdot c
@@ -125,133 +133,111 @@ without changing the rate at which fish are caught.
 
 **With census**, $E_s \sim \text{Poisson}(\lambda)$ pins $\lambda$ directly,
 $b$ no longer has to absorb the difference, and the effect is smaller than
-shown here. The tables below are therefore the census-free case — the scenario
+shown here. The tables below are therefore the census-free case -- the scenario
 under discussion, and the larger of the two.
 :::
 
-Using a predicted `b` instead of measuring one with census counts moves the
-catch estimate by the amounts below. Low and high are the ends of the **95% prediction interval** for `b` in that
-series: the range a new, unmeasured year is expected to fall in, estimated from
-the other years of that same fishery. Not hypothetical values.
+## How close a borrowed `b` gets
 
 ```{r calibration-line, results = "asis"}
 v <- cal |> filter(bias_type == "vehicle")
 t <- cal |> filter(bias_type == "trailer")
 cat(sprintf(
-  paste0("Across %d held-out fishery-years, a predicted **vehicle** `b` would have been within ",
-         "**%.0f%%** of the measured value in the typical year (worst case %.0f%%). The ",
-         "**trailer** term is considerably less reliable: typically **%.0f%%**, worst case ",
-         "**%.0f%%**.\n"),
+  paste0("Each fishery-year with a measured `b` was predicted from the **other** years of ",
+         "its own series and nothing else, then compared against what was actually ",
+         "measured -- %d such tests in all. A predicted **vehicle** `b` landed within ",
+         "**%.0f%%** of the measured value in the typical year, worst case %.0f%%. The ",
+         "**trailer** term is considerably less reliable: typically **%.0f%%** off, worst ",
+         "case **%.0f%%**.\n"),
   sum(cal$n_years_tested),
   median(v$median_abs_pct_err), max(abs(v$worst_pct_err)),
   median(t$median_abs_pct_err), max(abs(t$worst_pct_err))
 ))
 ```
 
-## What changing `b` does to estimated catch
+Because catch tracks `b` one-for-one, those are also the errors carried straight
+into the catch estimate. **The vehicle term is accurate enough to borrow; the
+trailer term is not.**
+
+## What the plausible range of `b` does to estimated catch
+
+Low and high below are the ends of the **95% prediction interval** for `b` in
+that series -- the range a new, unmeasured year is expected to fall in, worked
+out from the other years of that same fishery. They are not hypothetical round
+numbers; they are what `b` could actually be here.
 
 ```{r table}
-have_fish <- any(!is.na(wide$fitted))
-
-if (have_fish) {
-  wide |>
-    mutate(range = sprintf("%+.0f%% / %+.0f%%", pct_high, pct_low)) |>
-    select(fishery_name, group, bias_type, fitted, if_b_low, if_b_high, range) |>
-    gt(groupname_col = "fishery_name") |>
-    cols_label(group = "Catch group", bias_type = "b term", fitted = "As fitted",
-               if_b_low = "Low end of predicted b", if_b_high = "High end of predicted b",
-               range = "Range") |>
-    fmt_number(c(fitted, if_b_low, if_b_high), decimals = 0) |>
-    cols_align("right", c(fitted, if_b_low, if_b_high, range)) |>
-    tab_options(table.font.size = 13, data_row.padding = px(4),
-                row_group.font.weight = "bold") |>
-    tab_source_note(
-      "Fish. Low and high are the ends of the 95% prediction interval for b in that series -- the range a new, unmeasured year is expected to fall in, estimated from the other years of that fishery."
-    )
-} else {
-  # No season totals yet, so the answer is in percent. That is not a lesser
-  # result: the percentage change is IDENTICAL for every catch group, because
-  # catch is effort x catch rate and only effort moves. One row per fishery-year
-  # and b term covers every species at once.
-  wide |>
-    distinct(fishery_name, bias_type, pct_low, pct_high) |>
-    arrange(fishery_name, bias_type) |>
-    gt(groupname_col = "fishery_name") |>
-    cols_label(bias_type = "b term",
-               pct_low  = "If b lands at the low end",
-               pct_high = "If b lands at the high end") |>
-    fmt_number(c(pct_low, pct_high), decimals = 0, pattern = "{x}%",
-               force_sign = TRUE) |>
-    cols_align("right", c(pct_low, pct_high)) |>
-    tab_options(table.font.size = 13, data_row.padding = px(4),
-                row_group.font.weight = "bold") |>
-    tab_source_note(
-      "Change in estimated catch. Low and high are the ends of the 95% prediction interval for b in that series -- the range a new, unmeasured year is expected to fall in, estimated from the other years of that fishery. The percentage is the same for every catch group, because b moves effort and the catch rate is unchanged."
-    )
-}
-```
-
-```{r gear-split}
-t8_path <- file.path(OUT_DIR, "bss_b_T8_gear_split.csv")
-if (file.exists(t8_path)) {
-  cat("\n\n## Catch and effort by gear\n\n",
-      "The vehicle index counts every angler's vehicle; the trailer index counts",
-      "boat trailers. So the two terms act on different parts of the fishery, and",
-      "the split between bank and boat is what sets how far each one reaches.\n\n")
-  readr::read_csv(t8_path, show_col_types = FALSE) |>
-    filter(tier_kind == "anchor", bias_type == "vehicle") |>
-    mutate(group = group_label(est_cg)) |>
-    select(fishery_name, group, catch_bank, catch_boat, effort_bank, effort_boat) |>
-    gt() |>
-    cols_label(fishery_name = "Fishery", group = "Catch group",
-               catch_bank = "Bank", catch_boat = "Boat",
-               effort_bank = "Bank", effort_boat = "Boat") |>
-    tab_spanner("Catch (fish)", c(catch_bank, catch_boat)) |>
-    tab_spanner("Effort (angler-hours)", c(effort_bank, effort_boat)) |>
-    fmt_number(c(catch_bank, catch_boat, effort_bank, effort_boat), decimals = 0) |>
-    sub_missing(everything(), missing_text = "--") |>
-    tab_options(table.font.size = 13, data_row.padding = px(4))
-}
+# The two index channels do not observe the same anglers. The vehicle count sees
+# every angler's vehicle, so b[1] rescales the whole fishery. Trailers per BANK
+# angler go to ~0 in the interviews, so the trailer count sees boat anglers
+# essentially alone and b[2] moves the boat-caught portion. Saying so in the
+# row label keeps the percent honest without needing the gear totals, which is
+# exactly what part 2 supplies.
+wide |>
+  mutate(
+    term = if_else(bias_type == "vehicle",
+                   "vehicle -- whole fishery",
+                   "trailer -- boat-caught portion"),
+    b_range = sprintf("%.2f to %.2f", b_low, b_high),
+    yr = as.character(year_start)
+  ) |>
+  select(fishery_type, yr, term, b_fitted, b_range, pct_low, pct_high) |>
+  gt(groupname_col = "fishery_type") |>
+  cols_label(yr = "Year", term = "b term", b_fitted = "b as fitted",
+             b_range = "Plausible range for b",
+             pct_low = "If b is at the low end",
+             pct_high = "If b is at the high end") |>
+  fmt_number(b_fitted, decimals = 2) |>
+  fmt_number(c(pct_low, pct_high), decimals = 0, pattern = "{x}%", force_sign = TRUE) |>
+  cols_align("right", c(b_fitted, b_range, pct_low, pct_high)) |>
+  sub_missing(everything(), missing_text = "--") |>
+  tab_options(table.font.size = 13, data_row.padding = px(4),
+              row_group.font.weight = "bold") |>
+  tab_source_note(
+    paste0("Change in estimated catch. The percentage is the same for every species and ",
+           "catch group, because b moves effort and leaves the catch rate alone. ",
+           "Vehicle rows move the whole fishery; trailer rows move the boat-caught ",
+           "portion, so their effect on the season total is smaller by however much of ",
+           "the fishery is fished from the bank.")
+  )
 ```
 
 ```{r figure, fig.width = 9, fig.height = 6}
-if (have_fish) {
-  wide |>
-    ggplot(aes(y = fct_rev(factor(fishery_name)), color = bias_type)) +
-    geom_linerange(aes(xmin = if_b_high, xmax = if_b_low),
-                   position = position_dodge(width = 0.55), linewidth = 2.2, alpha = 0.9) +
-    geom_point(aes(x = fitted), position = position_dodge(width = 0.55),
-               size = 2.6, color = SURFACE) +
-    geom_point(aes(x = fitted), position = position_dodge(width = 0.55), size = 1.8) +
-    facet_wrap(~group, scales = "free_x") +
-    scale_x_continuous(labels = scales::comma) +
-    scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]), name = NULL) +
-    labs(title = "Estimated catch under the plausible range of b", x = "Fish", y = NULL) +
-    theme_bss()
-} else {
-  wide |>
-    distinct(fishery_name, bias_type, pct_low, pct_high) |>
-    ggplot(aes(y = fct_rev(factor(fishery_name)), color = bias_type)) +
-    geom_vline(xintercept = 0, color = INK_SECOND, linewidth = 0.5, linetype = "22") +
-    geom_linerange(aes(xmin = pct_high, xmax = pct_low),
-                   position = position_dodge(width = 0.55), linewidth = 2.2, alpha = 0.9) +
-    scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]), name = NULL) +
-    labs(title = "Change in estimated catch across the plausible range of b",
-         x = "Change in estimated catch (%)", y = NULL) +
-    theme_bss()
-}
+wide |>
+  mutate(term = if_else(bias_type == "vehicle",
+                        "vehicle (whole fishery)", "trailer (boat-caught portion)")) |>
+  ggplot(aes(y = fct_rev(factor(fishery_name)), color = term)) +
+  geom_vline(xintercept = 0, color = INK_SECOND, linewidth = 0.5, linetype = "22") +
+  geom_linerange(aes(xmin = pct_high, xmax = pct_low),
+                 position = position_dodge(width = 0.55), linewidth = 2.2, alpha = 0.9) +
+  scale_x_continuous(labels = function(x) paste0(ifelse(x > 0, "+", ""), x, "%")) +
+  scale_color_manual(values = c("vehicle (whole fishery)" = CAT[["blue"]],
+                                "trailer (boat-caught portion)" = CAT[["orange"]]),
+                     name = NULL) +
+  labs(title = "Change in estimated catch across the plausible range of b",
+       x = "Change in estimated catch", y = NULL) +
+  theme_bss()
 ```
 
-```{r fig-note, results = "asis"}
-cat(if (have_fish)
-  "The point is the estimate as fitted; the bar spans what it would be at the ends of the prediction interval for `b`.\n"
-else
-  "The bar spans the change in estimated catch across the prediction interval for `b`. Season totals in fish are not included in this version; the percentages apply to every catch group equally.\n")
-```
+Each bar spans what the catch estimate would be at the two ends of the plausible
+range for `b`. The right-hand end is the high `b` (catch revised down), the
+left-hand end the low `b` (catch revised up).
+
+## What is not in this part
+
+Season totals in fish, and the split between bank and boat, are being fitted
+now and follow in **part 2**. They do not change anything above -- the
+percentages hold for every species and catch group -- but they put the effect in
+fish, and they show how much of each fishery the trailer term can actually
+reach.
 
 ---
 
 *Method: `b` is the bias term on the effort index count in the BSS creel model;
-the derivation above is the one in the full report. Reliability figures are a leave-one-out
-backtest: each year predicted from the other years of its series, never from a
-mean containing itself. Full detail and code in `analysis/bss_bias/`.*
+the derivation above is the one in the full report. Reliability figures are a
+leave-one-out backtest -- each year predicted from the other years of its series,
+never from an average containing itself. The catch effects shown are an upper
+bound: they assume no census counts at all, which is the scenario under
+discussion. In a year that does collect census, the census partly corrects an
+imported `b` and the effect is smaller. Full detail and code in
+`analysis/bss_bias/`.*

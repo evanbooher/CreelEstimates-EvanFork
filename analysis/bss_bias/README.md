@@ -185,9 +185,10 @@ affects the creel estimates themselves and not just this work.
    The relationship is fixed by the model, not simulated: CPUE is fit from
    interviews alone (Stan line 205, no `b`), `b` multiplies the index-count
    Poisson mean (line 187), and catch is effort x trip length x CPUE (line 240).
-   So **catch is proportional to 1/b -- elasticity -1**, exactly, in a year with
-   no census. `b > 1` revises catch down; `b < 1` revises it up. Census (line
-   201) carries no `b` and is the only thing that breaks the confound.
+   So **catch is proportional to 1/b**, exactly, in a year with no census --
+   double `b` and catch is cut in half; halve `b` and catch doubles. `b > 1`
+   revises catch down; `b < 1` revises it up. Census (line 201) carries no `b`
+   and is the only thing that breaks the confound.
 
    The headline output is **T6, a leave-one-out backtest**: for every
    fishery-year with a measured `b`, what catch would have been had the series
@@ -217,6 +218,37 @@ affects the creel estimates themselves and not just this work.
    Run it serially from the **R Console** and watch it work:
    `source("analysis/bss_bias/01b_fit_catch_groups.R")`. Narrow it first with
    `GROUP_KEY` / `FISHERY_RE` / `YEARS_MODE` if wanted.
+
+## The two-part collaborator brief
+
+`report/` carries two short, self-contained HTML documents for external
+collaborators. They are **deliberately split by what they depend on**, so the
+first can be sent without waiting on a model sweep.
+
+| | Depends on | Contains |
+|---|---|---|
+| `11_share_brief.qmd` -- part 1 | `b` draws + the meta-analysis only | The 1/`b` mechanism with its derivation, the leave-one-out reliability of a borrowed `b`, and the **percent** change in estimated catch across each series' plausible range |
+| `12_estimates_update.qmd` -- part 2 | the above **plus** fitted season totals | The same result **in fish**, season totals and effort by bank/boat, and the two-channel arithmetic for why the two `b` terms reach different parts of the fishery |
+
+Part 1 never reads `bss_catch_baseline.csv`. That is the point: a stale or
+half-finished baseline sitting in `outputs/` cannot leak into it, and the
+percentages it reports are identical for every species and catch group anyway,
+because `b` moves effort and leaves the catch rate alone.
+
+Part 2 is the **complement, not a correction** -- nothing in part 1 changes when
+the fits land. It `stop()`s loudly rather than rendering against an absent or
+all-`NA` baseline.
+
+```
+# part 1 -- sendable as soon as 07 has run
+Rscript analysis/bss_bias/07_catch_sensitivity.R
+quarto render analysis/bss_bias/report/11_share_brief.qmd
+
+# part 2 -- after the production fits exist
+Rscript analysis/bss_bias/09_read_production_estimates.R
+Rscript analysis/bss_bias/07_catch_sensitivity.R
+quarto render analysis/bss_bias/report/12_estimates_update.qmd
+```
 
 ## Reproducing this outside WDFW
 

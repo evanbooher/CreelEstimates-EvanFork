@@ -28,7 +28,8 @@
 #
 #   So `b` reaches catch through exactly ONE channel (effort), and:
 #
-#         catch is proportional to 1 / b        (elasticity = -1)
+#         catch is proportional to 1 / b
+#         i.e. double b and catch is halved; halve b and catch doubles
 #
 #   b > 1 (index over-counts relative to anglers) revises effort and catch DOWN.
 #   b < 1 revises them UP.
@@ -83,7 +84,7 @@
 #      predicts it from the others. This is why T6's intervals are wider than
 #      T2's, and the wider ones are the honest ones.
 #
-# [S3] THE BACKTEST IS AN UPPER BOUND ON ERROR. Elasticity -1 assumes the year
+# [S3] THE BACKTEST IS AN UPPER BOUND ON ERROR. The exact 1/b relationship assumes the year
 #      has no census. Historical years mostly DID have census, which would have
 #      partially corrected an imported b. So T6 answers "what if we imported b
 #      AND collected no census" -- which is precisely this year's proposal, but
@@ -299,7 +300,7 @@ cli::cli_alert_info(
 # ------------------------------------------------------------------------------
 # T4 -- pass-through diagnostic
 #
-# Elasticity -1 is exact only under stated conditions. Rather than assert it,
+# The exact 1/b relationship holds only under stated conditions. Rather than assert it,
 # report per fishery-year what the data actually supports:
 #
 #   E_n > 0        census present -> census pins effort directly, so an error in
@@ -564,7 +565,7 @@ if (!is.null(catch_base) && all(gear_cols_t8 %in% names(catch_base))) {
   T8 <- T7 |>
     filter(tier_kind %in% c("anchor", "empirical")) |>
     distinct(basin, fishery_type, fishery_name, year_start, bias_type, tier,
-             b_fitted, b_alt, catch_multiplier) |>
+             tier_kind, b_fitted, b_alt, catch_multiplier) |>
     left_join(base_gear, by = "fishery_name", relationship = "many-to-many") |>
     filter(!is.na(C_sum_bank_median)) |>
     mutate(
@@ -600,7 +601,7 @@ if (!is.null(catch_base) && all(gear_cols_t8 %in% names(catch_base))) {
 
   T8 <- T8 |>
     select(basin, fishery_type, fishery_name, year_start, est_cg, bias_type, tier,
-           b_fitted, b_alt, rho,
+           tier_kind, b_fitted, b_alt, rho,
            catch_bank, catch_boat, catch_total,
            effort_bank, effort_boat, effort_total,
            pct_change_catch_total, any_of("baseline_source")) |>
