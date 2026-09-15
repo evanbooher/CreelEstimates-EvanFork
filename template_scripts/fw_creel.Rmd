@@ -932,10 +932,25 @@ for(ecg in names(inputs_bss)) {
     
   ## extract and summarize estimates and model fit statistics 
   ecg_keep <- list()
-  ecg_keep$overview <- get_bss_overview(bss_fit = ecg_fit, ecg = ecg)
-  ecg_keep$cpue_daily <- get_bss_cpue_daily(bss_fit = ecg_fit, ecg = ecg, dwg = dwg)
-  ecg_keep$catch_daily <- get_bss_catch_daily(bss_fit = ecg_fit, ecg = ecg, dwg = dwg)
-  ecg_keep$effort_daily <- get_bss_effort_daily(bss_fit = ecg_fit, ecg = ecg, dwg = dwg)
+  # Each of these is a post-fit SUMMARY. The fit is already complete by the time
+  # they run, and estimates_bss.rds is not written until the end of this chunk,
+  # so any one of them throwing has always destroyed a finished fit -- which is
+  # exactly what get_bss_overview() did at four chains. Individually guarded:
+  # a summary that cannot be built costs that summary, nothing else.
+  keep_try <- function(label, expr) {
+    out <- try(expr, silent = TRUE)
+    if (inherits(out, "try-error")) {
+      cli::cli_alert_warning(
+        "{label} failed for {ecg} -- the fit is unaffected. {conditionMessage(attr(out, 'condition'))}"
+      )
+      return(NULL)
+    }
+    out
+  }
+  ecg_keep$overview <- keep_try("get_bss_overview", get_bss_overview(bss_fit = ecg_fit, ecg = ecg))
+  ecg_keep$cpue_daily <- keep_try("get_bss_cpue_daily", get_bss_cpue_daily(bss_fit = ecg_fit, ecg = ecg, dwg = dwg))
+  ecg_keep$catch_daily <- keep_try("get_bss_catch_daily", get_bss_catch_daily(bss_fit = ecg_fit, ecg = ecg, dwg = dwg))
+  ecg_keep$effort_daily <- keep_try("get_bss_effort_daily", get_bss_effort_daily(bss_fit = ecg_fit, ecg = ecg, dwg = dwg))
   
   # Always extract draws for use in diagnostics and plots
   ecg_keep$draws <- extract(ecg_fit)
