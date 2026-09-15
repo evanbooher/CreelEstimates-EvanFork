@@ -120,10 +120,60 @@ targets <- read_csv(disc_path, show_col_types = FALSE) |>
 
 if (length(targets) == 0) cli::cli_abort("No fishery matched {.val {RENDER_FISHERY_RE}}.")
 
+# ------------------------------------------------------------------------------
+# Which catch groups are worth fitting, per fishery-year
+#
+# fw_creel builds inputs_bss from unique(est_cg) on the interview table, and
+# prep_dwg_interview_catch() puts est_cg on EVERY interview regardless of
+# whether a fish of that group was caught -- it replicates the interviews per
+# group and fills fish_count = 0. So the Rmd will happily fit a catch group
+# with zero recorded fish, which is a full MCMC run to learn that the posterior
+# is the prior truncated by having seen nothing.
+#
+# 00d's inventory already knows which groups have records. Narrowing
+# est_catch_groups per fishery here means those runs never start.
+# ------------------------------------------------------------------------------
+
+inv_path <- file.path(OUT_DIR, "bss_catch_inventory.csv")
+inventory <- if (file.exists(inv_path)) read_csv(inv_path, show_col_types = FALSE) else NULL
+if (is.null(inventory)) {
+  cli::cli_alert_warning(
+    "No {.file bss_catch_inventory.csv} -- every group will be fitted, including any with \
+     zero fish. Run {.file 00d_catch_inventory.R} first to skip those."
+  )
+}
+
+groups_for <- function(fn) {
+  if (is.null(inventory)) return(RENDER_GROUPS)
+  rows <- inventory |> filter(fishery_name == fn, catch_group %in% RENDER_GROUPS)
+  if (nrow(rows) == 0) {
+    cli::cli_alert_warning("{fn}: not in the inventory -- fitting all groups.")
+    return(RENDER_GROUPS)
+  }
+  keep <- rows |> filter(!is.na(n_fish), n_fish > 0) |> pull(catch_group)
+  intersect(RENDER_GROUPS, keep)
+}
+
 already_done <- function(fn) {
   d <- here::here("fishery_analyses", RENDER_PROJECT, fn)
   if (!dir.exists(d)) return(FALSE)
   length(list.files(d, pattern = "^estimates_bss\\.rds$", recursive = TRUE)) > 0
+}
+
+group_plan <- setNames(lapply(targets, groups_for), targets)
+empty <- names(group_plan)[lengths(group_plan) == 0]
+if (length(empty) > 0) {
+  cli::cli_alert_info("Skipping {length(empty)} fishery-year{?s} with no catch group carrying fish:")
+  print(empty)
+  targets <- setdiff(targets, empty)
+  group_plan <- group_plan[targets]
+}
+narrowed <- names(group_plan)[lengths(group_plan) < length(RENDER_GROUPS)]
+if (length(narrowed) > 0) {
+  cli::cli_alert_info("Fitting a reduced group set (zero-fish groups dropped) for:")
+  for (fn in narrowed) {
+    cli::cli_li("{fn}: {paste(group_plan[[fn]], collapse = ', ')}")
+  }
 }
 
 skipped <- character(0)
@@ -136,7 +186,7 @@ if (RENDER_SKIP_DONE) {
 cli::cli_h1("10 -- render fw_creel.Rmd per fishery-year")
 cli::cli_alert_info("Project:  {.val {RENDER_PROJECT}}")
 cli::cli_alert_info("Filter:   {.val {RENDER_FISHERY_RE}}")
-cli::cli_alert_info("Groups:   {.val {RENDER_GROUPS}} (all fitted in ONE render each)")
+cli::cli_alert_info("Groups:   {.val {RENDER_GROUPS}} (fitted in ONE render each; zero-fish groups dropped per fishery)")
 cli::cli_alert_info("To render: {length(targets)}")
 if (length(skipped) > 0) {
   cli::cli_alert_info("Skipping {length(skipped)} already carrying estimates_bss.rds (RENDER_SKIP_DONE):")
@@ -167,7 +217,12 @@ if (length(targets) > 0) {
       rm("analysis_lut", envir = .GlobalEnv)
     }
 
-    p <- utils::modifyList(BASE_PARAMS, list(fishery_name = fn))
+    grps <- group_plan[[fn]]
+    p <- utils::modifyList(BASE_PARAMS, list(
+      fishery_name     = fn,
+      est_catch_groups = catch_groups_df(grps)
+    ))
+    cli::cli_alert_info("Catch group{?s} for this render: {.val {grps}}")
     if (!is.null(RUN_PARAM_OVERRIDES[[fn]])) {
       p <- utils::modifyList(p, RUN_PARAM_OVERRIDES[[fn]])
     }
