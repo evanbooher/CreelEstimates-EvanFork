@@ -151,36 +151,53 @@ cat(sprintf(
 ## What changing `b` does to estimated catch
 
 ```{r table}
-wide |>
-  mutate(range = sprintf("%+.0f%% / %+.0f%%", pct_high, pct_low)) |>
-  select(fishery_name, group, bias_type, fitted, if_b_low, if_b_high, range) |>
-  gt(groupname_col = "fishery_name") |>
-  cols_label(
-    group     = "Catch group",
-    bias_type = "b term",
-    fitted    = "As fitted",
-    if_b_low  = "Low end of predicted b",
-    if_b_high = "High end of predicted b",
-    range     = "Range"
-  ) |>
-  fmt_number(c(fitted, if_b_low, if_b_high), decimals = 0) |>
-  cols_align("right", c(fitted, if_b_low, if_b_high, range)) |>
-  tab_options(table.font.size = 13, data_row.padding = px(4),
-              row_group.font.weight = "bold") |>
-  tab_source_note(
-    "Fish. Low and high are the ends of the 95% prediction interval for b in that series -- the range a new, unmeasured year is expected to fall in, estimated from the other years of that fishery."
-  )
+have_fish <- any(!is.na(wide$fitted))
+
+if (have_fish) {
+  wide |>
+    mutate(range = sprintf("%+.0f%% / %+.0f%%", pct_high, pct_low)) |>
+    select(fishery_name, group, bias_type, fitted, if_b_low, if_b_high, range) |>
+    gt(groupname_col = "fishery_name") |>
+    cols_label(group = "Catch group", bias_type = "b term", fitted = "As fitted",
+               if_b_low = "Low end of predicted b", if_b_high = "High end of predicted b",
+               range = "Range") |>
+    fmt_number(c(fitted, if_b_low, if_b_high), decimals = 0) |>
+    cols_align("right", c(fitted, if_b_low, if_b_high, range)) |>
+    tab_options(table.font.size = 13, data_row.padding = px(4),
+                row_group.font.weight = "bold") |>
+    tab_source_note(
+      "Fish. Low and high are the ends of the 95% prediction interval for b in that series -- the range a new, unmeasured year is expected to fall in, estimated from the other years of that fishery."
+    )
+} else {
+  # No season totals yet, so the answer is in percent. That is not a lesser
+  # result: the percentage change is IDENTICAL for every catch group, because
+  # catch is effort x catch rate and only effort moves. One row per fishery-year
+  # and b term covers every species at once.
+  wide |>
+    distinct(fishery_name, bias_type, pct_low, pct_high) |>
+    arrange(fishery_name, bias_type) |>
+    gt(groupname_col = "fishery_name") |>
+    cols_label(bias_type = "b term",
+               pct_low  = "If b lands at the low end",
+               pct_high = "If b lands at the high end") |>
+    fmt_number(c(pct_low, pct_high), decimals = 0, pattern = "{x}%",
+               force_sign = TRUE) |>
+    cols_align("right", c(pct_low, pct_high)) |>
+    tab_options(table.font.size = 13, data_row.padding = px(4),
+                row_group.font.weight = "bold") |>
+    tab_source_note(
+      "Change in estimated catch. Low and high are the ends of the 95% prediction interval for b in that series -- the range a new, unmeasured year is expected to fall in, estimated from the other years of that fishery. The percentage is the same for every catch group, because b moves effort and the catch rate is unchanged."
+    )
+}
 ```
-
-## Catch and effort by gear
-
-The vehicle index counts every angler's vehicle; the trailer index counts boat
-trailers. So the two terms act on different parts of the fishery, and the split
-between bank and boat is what sets how far each one reaches.
 
 ```{r gear-split}
 t8_path <- file.path(OUT_DIR, "bss_b_T8_gear_split.csv")
 if (file.exists(t8_path)) {
+  cat("\n\n## Catch and effort by gear\n\n",
+      "The vehicle index counts every angler's vehicle; the trailer index counts",
+      "boat trailers. So the two terms act on different parts of the fishery, and",
+      "the split between bank and boat is what sets how far each one reaches.\n\n")
   readr::read_csv(t8_path, show_col_types = FALSE) |>
     filter(tier_kind == "anchor", bias_type == "vehicle") |>
     mutate(group = group_label(est_cg)) |>
@@ -194,31 +211,43 @@ if (file.exists(t8_path)) {
     fmt_number(c(catch_bank, catch_boat, effort_bank, effort_boat), decimals = 0) |>
     sub_missing(everything(), missing_text = "--") |>
     tab_options(table.font.size = 13, data_row.padding = px(4))
-} else {
-  cat("*Gear split not available -- run 09_read_production_estimates.R, then 07.*")
 }
 ```
 
 ```{r figure, fig.width = 9, fig.height = 6}
-fig <- wide |>
-  mutate(label = paste0(fishery_name)) |>
-  ggplot(aes(y = fct_rev(factor(label)), color = bias_type)) +
-  geom_linerange(aes(xmin = if_b_high, xmax = if_b_low),
-                 position = position_dodge(width = 0.55), linewidth = 2.2, alpha = 0.9) +
-  geom_point(aes(x = fitted), position = position_dodge(width = 0.55),
-             size = 2.6, color = SURFACE) +
-  geom_point(aes(x = fitted), position = position_dodge(width = 0.55), size = 1.8) +
-  facet_wrap(~group, scales = "free_x") +
-  scale_x_continuous(labels = scales::comma) +
-  scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]), name = NULL) +
-  labs(title = "Estimated catch under the plausible range of b", x = "Fish", y = NULL) +
-  theme_bss()
-
-fig
+if (have_fish) {
+  wide |>
+    ggplot(aes(y = fct_rev(factor(fishery_name)), color = bias_type)) +
+    geom_linerange(aes(xmin = if_b_high, xmax = if_b_low),
+                   position = position_dodge(width = 0.55), linewidth = 2.2, alpha = 0.9) +
+    geom_point(aes(x = fitted), position = position_dodge(width = 0.55),
+               size = 2.6, color = SURFACE) +
+    geom_point(aes(x = fitted), position = position_dodge(width = 0.55), size = 1.8) +
+    facet_wrap(~group, scales = "free_x") +
+    scale_x_continuous(labels = scales::comma) +
+    scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]), name = NULL) +
+    labs(title = "Estimated catch under the plausible range of b", x = "Fish", y = NULL) +
+    theme_bss()
+} else {
+  wide |>
+    distinct(fishery_name, bias_type, pct_low, pct_high) |>
+    ggplot(aes(y = fct_rev(factor(fishery_name)), color = bias_type)) +
+    geom_vline(xintercept = 0, color = INK_SECOND, linewidth = 0.5, linetype = "22") +
+    geom_linerange(aes(xmin = pct_high, xmax = pct_low),
+                   position = position_dodge(width = 0.55), linewidth = 2.2, alpha = 0.9) +
+    scale_color_manual(values = c(vehicle = CAT[["blue"]], trailer = CAT[["orange"]]), name = NULL) +
+    labs(title = "Change in estimated catch across the plausible range of b",
+         x = "Change in estimated catch (%)", y = NULL) +
+    theme_bss()
+}
 ```
 
-The point is the estimate as fitted; the bar spans what it would be at the ends
-of that series' plausible range for `b`.
+```{r fig-note, results = "asis"}
+cat(if (have_fish)
+  "The point is the estimate as fitted; the bar spans what it would be at the ends of the prediction interval for `b`.\n"
+else
+  "The bar spans the change in estimated catch across the prediction interval for `b`. Season totals in fish are not included in this version; the percentages apply to every catch group equally.\n")
+```
 
 ---
 
