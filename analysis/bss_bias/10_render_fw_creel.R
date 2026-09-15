@@ -56,6 +56,14 @@ if (!exists("RENDER_SKIP_DONE",  inherits = FALSE)) RENDER_SKIP_DONE  <- TRUE
 # per fishery-year is worth opening. TRUE skips all 25 plot/table chunks, which
 # is faster but leaves the HTML essentially empty.
 if (!exists("RENDER_FIT_ONLY",   inherits = FALSE)) RENDER_FIT_ONLY   <- FALSE
+# Render order. A sweep is hours long and the first thing it is asked to do is
+# tell you whether it still crashes -- so the cheapest fishery-years go first.
+# Basin priority is explicit rather than inferred, with the smallest dataset
+# within a basin (fewest interviews, per 00d's inventory) running first.
+# Anything not named here sorts after everything that is.
+if (!exists("RENDER_BASIN_ORDER", inherits = FALSE)) {
+  RENDER_BASIN_ORDER <- c("Stillaguamish", "Snohomish", "Skagit")
+}
 
 RMD <- here::here("template_scripts", "fw_creel.Rmd")
 if (!file.exists(RMD)) cli::cli_abort("{.file {RMD}} not found.")
@@ -122,6 +130,7 @@ targets <- read_csv(disc_path, show_col_types = FALSE) |>
   filter(basin_match == "target", include_in_run,
          str_detect(fishery_name, RENDER_FISHERY_RE)) |>
   pull(fishery_name) |> unique() |> sort()
+# Ordered further down, once the inventory is available to size each one.
 
 if (length(targets) == 0) cli::cli_abort("No fishery matched {.val {RENDER_FISHERY_RE}}.")
 
@@ -181,6 +190,41 @@ if (length(narrowed) > 0) {
   }
 }
 
+# ------------------------------------------------------------------------------
+# Order: cheapest first, so a crash surfaces in minutes rather than hours
+# ------------------------------------------------------------------------------
+
+# Size proxy: the interviews the largest planned group will carry. n_fish is
+# the wrong measure -- a group with one Chinook still fits the whole season of
+# effort and interview data, and it is the interview and count volume that sets
+# sampling time.
+size_of <- function(fn) {
+  if (is.null(inventory) || !"n_interviews" %in% names(inventory)) return(NA_real_)
+  rows <- inventory |> filter(fishery_name == fn, catch_group %in% group_plan[[fn]])
+  if (nrow(rows) == 0) return(NA_real_)
+  # max() of an all-NA column returns -Inf, which would sort this fishery to
+  # the FRONT -- the opposite of what an unknown size should do.
+  v <- suppressWarnings(max(rows$n_interviews, na.rm = TRUE))
+  if (!is.finite(v)) NA_real_ else as.numeric(v)
+}
+
+basin_rank <- function(fn) {
+  hit <- which(vapply(RENDER_BASIN_ORDER, function(b) grepl(b, fn, fixed = TRUE), logical(1)))
+  if (length(hit) == 0) length(RENDER_BASIN_ORDER) + 1L else min(hit)
+}
+
+order_tbl <- tibble(
+  fishery_name = targets,
+  basin_rank   = map_int(targets, basin_rank),
+  n_interviews = map_dbl(targets, size_of)
+) |>
+  # NA size sorts last within its basin rather than first: an unknown is not a
+  # reason to spend the first hour of the sweep on it.
+  arrange(basin_rank, is.na(n_interviews), n_interviews, fishery_name)
+
+targets    <- order_tbl$fishery_name
+group_plan <- group_plan[targets]
+
 skipped <- character(0)
 if (RENDER_SKIP_DONE) {
   done <- targets[map_lgl(targets, already_done)]
@@ -193,7 +237,12 @@ cli::cli_alert_info("Project:  {.val {RENDER_PROJECT}}")
 cli::cli_alert_info("Filter:   {.val {RENDER_FISHERY_RE}}")
 cli::cli_alert_info("Report:   {if (RENDER_FIT_ONLY) 'fit only -- HTML will be near-empty' else 'full report with plots and tables'}")
 cli::cli_alert_info("Groups:   {.val {RENDER_GROUPS}} (fitted in ONE render each; zero-fish groups dropped per fishery)")
+cli::cli_alert_info("Order:    cheapest first -- {.val {RENDER_BASIN_ORDER}}, smallest dataset within each")
 cli::cli_alert_info("To render: {length(targets)}")
+order_tbl |>
+  filter(fishery_name %in% targets) |>
+  select(fishery_name, n_interviews) |>
+  print(n = Inf)
 if (length(skipped) > 0) {
   cli::cli_alert_info("Skipping {length(skipped)} already carrying estimates_bss.rds (RENDER_SKIP_DONE):")
   print(skipped)
