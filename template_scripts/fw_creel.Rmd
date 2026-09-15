@@ -28,6 +28,7 @@ params:
   fit_only: FALSE  # TRUE skips every plot/table/export chunk -- fetch, prep, sample, save estimates_bss.rds, nothing else. Default FALSE: a rendered report should have something in it.
   save_draws: FALSE  # TRUE keeps posterior draws in estimates_bss.rds (needed by any downstream analysis that reads C_sum/E_sum/b)
   section_filter: !r numeric(0)  # e.g. c(1,2,3) to estimate only those sections; empty keeps every section the fetch returns
+  trim_to_last_sampled: FALSE  # TRUE pulls est_date_end back to the last date actually sampled within the window
 output:
   html_document:
     toc: true
@@ -329,6 +330,48 @@ if (length(keep_sections) > 0) {
     }
     if (nrow(kept) == 0) {
       cli_alert_warning("  {nm}: EMPTY after the section filter.")
+    }
+  }
+}
+
+# ---- Optional trim to the last sampled date -----------------------------------
+# Pull est_date_end back to the last date on which anything was actually
+# surveyed within the window. Applied AFTER the section filter, so "sampled"
+# means sampled in the sections being estimated -- trimming first would keep a
+# tail of days that only the excluded sections covered.
+#
+# Trailing unsampled days are not harmless: prep_days() puts every one of them in
+# the day grid, and the BSS then estimates effort and catch for days nobody
+# visited, on the strength of the priors alone.
+#
+# Sampled = any effort count OR any interview. Effort alone would be the tighter
+# definition, but a day with interviews and no count is still a surveyed day.
+if (isTRUE(params$trim_to_last_sampled)) {
+  sampled_dates <- c(
+    if (!is.null(dwg$effort$event_date)) as.Date(dwg$effort$event_date),
+    if (!is.null(dwg$interview$event_date)) as.Date(dwg$interview$event_date)
+  )
+  win_end <- as.Date(est_dates$est_date_end)
+  sampled_dates <- sampled_dates[!is.na(sampled_dates) & sampled_dates <= win_end]
+
+  if (length(sampled_dates) == 0) {
+    cli_alert_warning(
+      "trim_to_last_sampled: nothing sampled on or before {.val {as.character(win_end)}} \
+       -- leaving the window alone."
+    )
+  } else {
+    last_sampled <- max(sampled_dates)
+    n_trimmed <- as.integer(win_end - last_sampled)
+    if (n_trimmed > 0) {
+      est_dates$est_date_end <- as.character(last_sampled)
+      # No {?s} marker: two quantities in one message is what cli aborts on.
+      end_txt <- as.character(last_sampled)
+      cli_alert_info(
+        "Window trimmed to the last sampled date: {end_txt} \
+         ({n_trimmed} unsampled days removed from the end)."
+      )
+    } else {
+      cli_alert_info("Window already ends on the last sampled date.")
     }
   }
 }

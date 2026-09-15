@@ -235,15 +235,17 @@ days, against 76 for 2024-25 and 61 for 2025-26 -- with a sparse tail of late
 November dates that the other years do not have.
 
 **Handled here:** `10_render_fw_creel.R` sets
-`section_filter = c(1, 2, 3)` and pins the window to 2022-09-01 / 2022-11-15 for
-that fishery-year via `RUN_PARAM_OVERRIDES`. `fw_creel.Rmd` applies the section
-filter to every `dwg` table carrying `section_num`, after `dwg_raw.rds` is
-written and before `prep_days()` builds the day grid, and reports the row counts
-dropped per table.
+`section_filter = c(1, 2, 3)`, caps the window at 2022-09-30, and sets
+`trim_to_last_sampled = TRUE` for that fishery-year via `RUN_PARAM_OVERRIDES`.
+`fw_creel.Rmd` applies the section filter to every `dwg` table carrying
+`section_num`, after `dwg_raw.rds` is written and before `prep_days()` builds the
+day grid, and reports the row counts dropped per table. The trim then pulls
+`est_date_end` back to the last date actually sampled in the retained sections,
+so the window ends on a surveyed day rather than a chosen one.
 
-**The 2022-11-15 cutoff is a judgement call, not a value read off the data.**
-It is one line in `RUN_PARAM_OVERRIDES`. Anyone revisiting this should look at
-where effort counts actually thin out and move it.
+Trailing unsampled days are not harmless: `prep_days()` puts every one of them in
+the day grid, and the BSS estimates effort and catch for days nobody visited on
+the strength of the priors alone.
 
 **Not yet investigated:** whether the extra sections are tributaries, a
 different reach naming convention, or a data-entry artifact; and whether any

@@ -127,16 +127,18 @@ RUN_PARAM_OVERRIDES <- list(
   # unmatched closure rows.
   #
   # DATES -- the lookup table gives 2022-09-01 to 2022-11-30 (91 days), the
-  # longest window in the series. Both ends are pinned here rather than just the
-  # end: resolve_dates() queries the database whenever EITHER is blank, so
-  # pinning both also makes this run reproducible without a connection.
+  # longest window in the series. Capped at the end of September and then
+  # trimmed by the render to the last date actually sampled within that cap, so
+  # the window ends on a surveyed day rather than on a chosen one.
   #
-  # 2022-11-15 IS AN ASSUMPTION, not a value read off the data -- change this one
-  # date if the tail starts somewhere else.
+  # Both ends are pinned rather than just the end: resolve_dates() queries the
+  # database whenever EITHER is blank, so pinning both also makes this run
+  # reproducible without a connection.
   "Stillaguamish salmon and gamefish 2022-23" = list(
-    section_filter = c(1, 2, 3),
-    est_date_start = "2022-09-01",
-    est_date_end   = "2022-11-15"
+    section_filter       = c(1, 2, 3),
+    est_date_start       = "2022-09-01",
+    est_date_end         = "2022-09-30",
+    trim_to_last_sampled = TRUE
   )
   # "Stillaguamish salmon and gamefish 2025-26" = list(est_date_start = "2025-09-01")
 )
