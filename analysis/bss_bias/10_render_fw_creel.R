@@ -23,6 +23,7 @@
 #     RENDER_GROUPS     <- c("chinook_all", "coho_harvest")
 #     RENDER_PROJECT    <- "bss_bias"
 #     RENDER_SKIP_DONE  <- TRUE     # skip fishery-years that already have output
+#     RENDER_FIT_ONLY   <- FALSE    # FALSE keeps the plots/tables, so the HTML is worth reading
 #
 #   Run it serially and watch it. Each render is a full BSS fit; budget
 #   accordingly and check the first one before walking away.
@@ -51,6 +52,10 @@ if (!exists("RENDER_FISHERY_RE", inherits = FALSE)) RENDER_FISHERY_RE <- "Snohom
 if (!exists("RENDER_GROUPS",     inherits = FALSE)) RENDER_GROUPS     <- names(CATCH_GROUPS)
 if (!exists("RENDER_PROJECT",    inherits = FALSE)) RENDER_PROJECT    <- "bss_bias"
 if (!exists("RENDER_SKIP_DONE",  inherits = FALSE)) RENDER_SKIP_DONE  <- TRUE
+# TRUE skips every plot and table chunk -- fastest, but the HTML comes out
+# essentially empty. Set FALSE to get a full, inspectable report per
+# fishery-year, at the cost of the plotting time.
+if (!exists("RENDER_FIT_ONLY",   inherits = FALSE)) RENDER_FIT_ONLY   <- TRUE
 
 RMD <- here::here("template_scripts", "fw_creel.Rmd")
 if (!file.exists(RMD)) cli::cli_abort("{.file {RMD}} not found.")
@@ -94,7 +99,7 @@ BASE_PARAMS <- list(
   # Faster, and it removes the rendering steps that can fail AFTER a fit has
   # completed -- the trace plot in particular aborts on the NaN generated
   # quantities a low-catch group produces.
-  fit_only                      = TRUE
+  fit_only                      = RENDER_FIT_ONLY
 )
 
 # Per-fishery overrides, keyed on exact fishery_name. Anything here wins over
@@ -186,6 +191,7 @@ if (RENDER_SKIP_DONE) {
 cli::cli_h1("10 -- render fw_creel.Rmd per fishery-year")
 cli::cli_alert_info("Project:  {.val {RENDER_PROJECT}}")
 cli::cli_alert_info("Filter:   {.val {RENDER_FISHERY_RE}}")
+cli::cli_alert_info("Report:   {if (RENDER_FIT_ONLY) 'fit only -- HTML will be near-empty' else 'full report with plots and tables'}")
 cli::cli_alert_info("Groups:   {.val {RENDER_GROUPS}} (fitted in ONE render each; zero-fish groups dropped per fishery)")
 cli::cli_alert_info("To render: {length(targets)}")
 if (length(skipped) > 0) {

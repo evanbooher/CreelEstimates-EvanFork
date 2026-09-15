@@ -1551,8 +1551,13 @@ save_gt_table(interview_coverage_table, paste0("interview_coverage_table"))
 
 ```{r transform_estimates, eval=!params$fit_only, results='hide', cache=params$enable_cache, dependson="estimates_bss", cache.extra=param_hash}
 #Extract and transform model estimates into a common format
+# WRAPPED: this reformats finished estimates for export and is the LAST thing
+# in the document. A failure here has always cost the whole render -- and the
+# HTML -- despite the fits being complete and already written to disk by the
+# estimates_bss chunk. It warns and continues instead.
 transformed_pe_data <- list()
 transformed_bss_data <- list()
+try({
 #Export data from one or both models
 if (params$export %in% c("database", "local") && !params$model_used %in% c("PE only", "BSS only", "Both models" )) {
   stop("\nInvalid value for export or model_used parameter.")
@@ -1599,9 +1604,14 @@ if (params$export %in% c("database", "local") && !params$model_used %in% c("PE o
 # Save transformed estimates locally
 # saveRDS(creel_estimates, file.path(outputs_folders$outputs, "creel_estimates_transformed.rds"))
 # cli_alert_success("Transformed estimates saved to {.path {file.path(outputs_folders$outputs, 'creel_estimates_transformed.rds')}}")
+}, silent = FALSE)
+
 ```
 
 ```{r export_estimates, results='hide', eval=!params$fit_only}
+# Same reasoning as the transform chunk above: never let the export step cost a
+# render whose estimates are already saved.
+try({
 
 if (params$export == "database") {
   #Converts metadata to JSON and adds to analysis_lut
@@ -1647,4 +1657,6 @@ if (params$export == "database") {
 } else {
   cli_alert_warning("Export parameter is '{params$export}' - no export performed")
 }
+}, silent = FALSE)
+
 ```
