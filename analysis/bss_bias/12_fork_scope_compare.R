@@ -40,9 +40,9 @@ source(here::here("analysis", "bss_bias", "common.R"))
 source(here::here("analysis", "bss_bias", "fishery_data.R"))
 source(here::here("analysis", "bss_bias", "scope_rules.R"))
 
-# Boat anglers in census, below which b[2] is reported as unidentifiable rather
-# than as a number. Not a tuned threshold -- it is "enough to be a measurement
-# at all". Every fit in this comparison falls under it, which is the finding.
+# Boat anglers in census, below which the trailer term is flagged as
+# data-limited. Not a tuned threshold -- it is "enough to be a measurement at
+# all". Every fit in this comparison falls under it, which is itself the finding.
 CENSUS_BOAT_FLOOR <- 20
 
 # The four fits. Sections are resolved per scope from scope_rules.R rather than
@@ -150,14 +150,15 @@ effort |>
          census_anglers_bank, census_anglers_boat, index_vehicles, index_trailers) |>
   print(n = Inf)
 
-# The trailer channel needs boat anglers in the CENSUS, not trailers in the
-# index: with no boat anglers counted there is nothing for b[2] to be measured
-# against, however many trailers were seen.
+# The trailer channel is measured against boat anglers in the CENSUS, not
+# against trailers in the index: however many trailers were counted, there is
+# nothing to compare them to without boat anglers in the census.
 thin <- effort |> filter(census_anglers_boat < CENSUS_BOAT_FLOOR)
 if (nrow(thin) > 0) {
+  n_boat_floor <- CENSUS_BOAT_FLOOR
   cli_alert_warning(
-    "b[2] (trailer) is NOT identifiable for: {.val {thin$fit}} -- fewer than \\
-     {CENSUS_BOAT_FLOOR} boat anglers in census across the whole window."
+    "Trailer term is DATA-LIMITED for {.val {thin$fit}}: fewer than \\
+     {n_boat_floor} boat anglers counted in census across the whole window."
   )
 }
 
@@ -183,30 +184,46 @@ scoped <- FITS |>
   mutate(out_name = paste0(fishery_name, " [", scope, "]")) |>
   left_join(b_all, by = c("out_name" = "fishery_name"))
 
-missing <- scoped |> filter(is.na(median)) |> distinct(fit, bias_type)
+fitted_rows <- scoped |> filter(!is.na(median))
+if (nrow(fitted_rows) == 0) {
+  # Stop here rather than letting a zero-row mutate() fail on a column that is
+  # only present once there is something to describe.
+  cli_alert_warning("No fitted b for any of the four scopes yet -- comparison skipped.")
+  cli_alert_info("Audit tables are written. Fit with {.code RUN_SCOPE <- SCOPE_PRESETS$MS} then 01, and again for {.code $NF}.")
+  quit(save = "no")
+}
+missing <- scoped |> filter(is.na(median)) |> distinct(fit)
 if (nrow(missing) > 0) {
-  cli_alert_warning("No fitted b yet for: {.val {unique(missing$fit)}}")
+  cli_alert_warning("No fitted b yet for: {.val {missing$fit}}")
 }
 
-cmp <- scoped |>
-  filter(!is.na(median)) |>
+cmp <- fitted_rows |>
   left_join(effort |> select(fit, n_paired_anchors, census_anglers_bank,
                              census_anglers_boat, index_vehicles, index_trailers),
             by = "fit") |>
   mutate(
-    # Two separate reasons a b should not be quoted, kept separate because they
-    # have different remedies: too little data of the right kind, versus a
-    # posterior that never moved off its prior.
-    identifiable = case_when(
-      bias_type == "trailer" & census_anglers_boat < CENSUS_BOAT_FLOOR ~ "no -- no boat anglers in census",
-      !informed                                                        ~ "no -- posterior tracks the prior",
-      TRUE                                                             ~ "yes"
+    # informed_flag comes straight from 01 ("informed" / "weak" /
+    # "prior-dominated" / "unconverged"); `informed` is derived inside 06 and is
+    # not a column of bss_b_summary.csv. Reading the flag rather than
+    # re-deriving it keeps one definition of the judgement.
+    #
+    # Kept as a stated LIMITATION rather than a verdict on identifiability:
+    # these are all reasons to read a number with its context, and they have
+    # different remedies -- more census boat coverage versus more anchors.
+    limitation = case_when(
+      bias_type == "trailer" & census_anglers_boat < CENSUS_BOAT_FLOOR ~
+        "data-limited: few boat anglers in census",
+      informed_flag == "unconverged"    ~ "data-limited: did not converge",
+      informed_flag == "prior-dominated" ~ "data-limited: posterior tracks the prior",
+      informed_flag == "weak"            ~ "data-limited: few angler interviews",
+      TRUE                               ~ ""
     ),
+    data_limited = limitation != "",
     b_ci = sprintf("%.2f (%.2f-%.2f)", median, q2.5, q97.5)
   ) |>
   select(fit, scope, year, bias_type, b = median, b_lo = q2.5, b_hi = q97.5,
-         b_ci, identifiable, prior_contraction, n_paired_anchors,
-         census_anglers_bank, census_anglers_boat,
+         b_ci, data_limited, limitation, informed_flag, prior_contraction,
+         n_paired_anchors, census_anglers_bank, census_anglers_boat,
          index_vehicles, index_trailers) |>
   arrange(bias_type, scope, year)
 
@@ -214,12 +231,12 @@ write_csv(cmp, file.path(OUT_DIR, "bss_b_scope_compare.csv"))
 cli_alert_success("Comparison written ({nrow(cmp)} row{?s}).")
 
 cli_h2("b by fork and year")
-cmp |> select(fit, bias_type, b_ci, identifiable, n_paired_anchors,
+cmp |> select(fit, bias_type, b_ci, limitation, n_paired_anchors,
               census_anglers_boat) |> print(n = Inf)
 
 # --- The figure ---------------------------------------------------------------
-# Vehicle only. A panel of trailer estimates that the table declares
-# unidentifiable would be read as a result by anyone who saw the figure alone.
+# Vehicle only. A panel of trailer estimates the table flags as data-limited
+# would be read as a result by anyone who saw the figure alone.
 fig_df <- cmp |> filter(bias_type == "vehicle")
 
 if (nrow(fig_df) > 0) {
