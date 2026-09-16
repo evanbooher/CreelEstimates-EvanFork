@@ -166,104 +166,118 @@ if (nrow(thin) > 0) {
 # COMPARE -- the four b values, with the audit beside them
 # ------------------------------------------------------------------------------
 
+# IN A FUNCTION, AND NOT BECAUSE IT NEEDS TO BE.
+#
+# This half has two early exits -- no b summary yet, and no fitted scopes yet --
+# and the obvious way to write those at top level is quit(). In Rscript that
+# ends the script; sourced from the RStudio console, which is how this is
+# actually run, it ends the SESSION. return() from a function exits the same
+# code path without that difference in behaviour between the two ways of
+# running it.
 summary_path <- file.path(OUT_DIR, "bss_b_summary.csv")
-if (!file.exists(summary_path)) {
-  cli_alert_info(
-    "No {.file bss_b_summary.csv} yet -- audit tables written, comparison skipped."
-  )
-  cli_alert_info("Fit first: {.code RUN_SCOPE <- SCOPE_PRESETS$MS} then source 01, and again for $NF.")
-  quit(save = "no")
-}
 
-b_all <- read_csv(summary_path, show_col_types = FALSE)
+run_comparison <- function() {
+
+  if (!file.exists(summary_path)) {
+    cli_alert_info(
+      "No {.file bss_b_summary.csv} yet -- audit tables written, comparison skipped."
+    )
+    cli_alert_info("Fit first: {.code RUN_SCOPE <- SCOPE_PRESETS$MS} then source 01, and again for $NF.")
+    return(invisible(NULL))
+  }
+
+  b_all <- read_csv(summary_path, show_col_types = FALSE)
 
 # 01 files scoped results under "<fishery_name> [TAG]" -- see scoped_name() in
 # scope_rules.R. Matching on that is what keeps the fork fits from being
 # confused with the whole-basin fits of the same two fishery-years.
-scoped <- FITS |>
-  mutate(out_name = paste0(fishery_name, " [", scope, "]")) |>
-  left_join(b_all, by = c("out_name" = "fishery_name"))
+  scoped <- FITS |>
+    mutate(out_name = paste0(fishery_name, " [", scope, "]")) |>
+    left_join(b_all, by = c("out_name" = "fishery_name"))
 
-fitted_rows <- scoped |> filter(!is.na(median))
-if (nrow(fitted_rows) == 0) {
-  # Stop here rather than letting a zero-row mutate() fail on a column that is
-  # only present once there is something to describe.
-  cli_alert_warning("No fitted b for any of the four scopes yet -- comparison skipped.")
-  cli_alert_info("Audit tables are written. Fit with {.code RUN_SCOPE <- SCOPE_PRESETS$MS} then 01, and again for {.code $NF}.")
-  quit(save = "no")
+  fitted_rows <- scoped |> filter(!is.na(median))
+  if (nrow(fitted_rows) == 0) {
+    # Return here rather than letting a zero-row mutate() fail on a column that
+    # is only present once there is something to describe.
+    cli_alert_warning("No fitted b for any of the four scopes yet -- comparison skipped.")
+    cli_alert_info("Audit tables are written. Fit with {.code RUN_SCOPE <- SCOPE_PRESETS$MS} then 01, and again for {.code $NF}.")
+    return(invisible(NULL))
+  }
+  missing <- scoped |> filter(is.na(median)) |> distinct(fit)
+  if (nrow(missing) > 0) {
+    cli_alert_warning("No fitted b yet for: {.val {missing$fit}}")
+  }
+
+  cmp <- fitted_rows |>
+    left_join(effort |> select(fit, n_paired_anchors, census_anglers_bank,
+                               census_anglers_boat, index_vehicles, index_trailers),
+              by = "fit") |>
+    mutate(
+      # informed_flag comes straight from 01 ("informed" / "weak" /
+      # "prior-dominated" / "unconverged"); `informed` is derived inside 06 and is
+      # not a column of bss_b_summary.csv. Reading the flag rather than
+      # re-deriving it keeps one definition of the judgement.
+      #
+      # Kept as a stated LIMITATION rather than a verdict on identifiability:
+      # these are all reasons to read a number with its context, and they have
+      # different remedies -- more census boat coverage versus more anchors.
+      limitation = case_when(
+        bias_type == "trailer" & census_anglers_boat < CENSUS_BOAT_FLOOR ~
+          "data-limited: few boat anglers in census",
+        informed_flag == "unconverged"    ~ "data-limited: did not converge",
+        informed_flag == "prior-dominated" ~ "data-limited: posterior tracks the prior",
+        informed_flag == "weak"            ~ "data-limited: few angler interviews",
+        TRUE                               ~ ""
+      ),
+      data_limited = limitation != "",
+      b_ci = sprintf("%.2f (%.2f-%.2f)", median, q2.5, q97.5)
+    ) |>
+    select(fit, scope, year, bias_type, b = median, b_lo = q2.5, b_hi = q97.5,
+           b_ci, data_limited, limitation, informed_flag, prior_contraction,
+           n_paired_anchors, census_anglers_bank, census_anglers_boat,
+           index_vehicles, index_trailers) |>
+    arrange(bias_type, scope, year)
+
+  write_csv(cmp, file.path(OUT_DIR, "bss_b_scope_compare.csv"))
+  cli_alert_success("Comparison written ({nrow(cmp)} row{?s}).")
+
+  cli_h2("b by fork and year")
+  cmp |> select(fit, bias_type, b_ci, limitation, n_paired_anchors,
+                census_anglers_boat) |> print(n = Inf)
+
+  # --- The figure ---------------------------------------------------------------
+  # Vehicle only. A panel of trailer estimates the table flags as data-limited
+  # would be read as a result by anyone who saw the figure alone.
+  fig_df <- cmp |> filter(bias_type == "vehicle")
+
+  if (nrow(fig_df) > 0) {
+    fig20 <- fig_df |>
+      mutate(scope_label = if_else(scope == "MS", "Mainstem", "North Fork"),
+             year_label  = factor(year)) |>
+      ggplot(aes(x = year_label, y = b, colour = scope_label)) +
+      geom_hline(yintercept = 1, colour = BASELINE_COL, linewidth = 0.4) +
+      geom_linerange(aes(ymin = b_lo, ymax = b_hi),
+                     position = position_dodge(width = 0.4), linewidth = 1.6, alpha = 0.9) +
+      geom_point(position = position_dodge(width = 0.4), size = 2.8) +
+      # Anchor count on the estimate itself: the interval already says the
+      # posterior is wide, this says why.
+      geom_text(aes(label = paste0(n_paired_anchors, " anchors")),
+                position = position_dodge(width = 0.4),
+                vjust = -1.4, size = 3, show.legend = FALSE) +
+      scale_colour_manual(values = c(Mainstem = CAT[["blue"]], `North Fork` = CAT[["aqua"]]),
+                          name = NULL) +
+      labs(title = "Vehicle-index bias term by fork, Sep 16 - Oct 31",
+           x = NULL, y = "b (vehicle)") +
+      theme_bss()
+
+    save_fig(fig20, "fig20_fork_scope_b", width = 8, height = 6)
+    cli_alert_success("{.file fig20_fork_scope_b}")
+  } else {
+    cli_alert_info("No vehicle b available yet -- figure skipped.")
+  }
+
+  cli_rule()
+  cli_alert_info("Tables: {.file bss_b_scope_sites.csv}, {.file bss_b_scope_effort.csv}, {.file bss_b_scope_compare.csv}")
 }
-missing <- scoped |> filter(is.na(median)) |> distinct(fit)
-if (nrow(missing) > 0) {
-  cli_alert_warning("No fitted b yet for: {.val {missing$fit}}")
-}
 
-cmp <- fitted_rows |>
-  left_join(effort |> select(fit, n_paired_anchors, census_anglers_bank,
-                             census_anglers_boat, index_vehicles, index_trailers),
-            by = "fit") |>
-  mutate(
-    # informed_flag comes straight from 01 ("informed" / "weak" /
-    # "prior-dominated" / "unconverged"); `informed` is derived inside 06 and is
-    # not a column of bss_b_summary.csv. Reading the flag rather than
-    # re-deriving it keeps one definition of the judgement.
-    #
-    # Kept as a stated LIMITATION rather than a verdict on identifiability:
-    # these are all reasons to read a number with its context, and they have
-    # different remedies -- more census boat coverage versus more anchors.
-    limitation = case_when(
-      bias_type == "trailer" & census_anglers_boat < CENSUS_BOAT_FLOOR ~
-        "data-limited: few boat anglers in census",
-      informed_flag == "unconverged"    ~ "data-limited: did not converge",
-      informed_flag == "prior-dominated" ~ "data-limited: posterior tracks the prior",
-      informed_flag == "weak"            ~ "data-limited: few angler interviews",
-      TRUE                               ~ ""
-    ),
-    data_limited = limitation != "",
-    b_ci = sprintf("%.2f (%.2f-%.2f)", median, q2.5, q97.5)
-  ) |>
-  select(fit, scope, year, bias_type, b = median, b_lo = q2.5, b_hi = q97.5,
-         b_ci, data_limited, limitation, informed_flag, prior_contraction,
-         n_paired_anchors, census_anglers_bank, census_anglers_boat,
-         index_vehicles, index_trailers) |>
-  arrange(bias_type, scope, year)
-
-write_csv(cmp, file.path(OUT_DIR, "bss_b_scope_compare.csv"))
-cli_alert_success("Comparison written ({nrow(cmp)} row{?s}).")
-
-cli_h2("b by fork and year")
-cmp |> select(fit, bias_type, b_ci, limitation, n_paired_anchors,
-              census_anglers_boat) |> print(n = Inf)
-
-# --- The figure ---------------------------------------------------------------
-# Vehicle only. A panel of trailer estimates the table flags as data-limited
-# would be read as a result by anyone who saw the figure alone.
-fig_df <- cmp |> filter(bias_type == "vehicle")
-
-if (nrow(fig_df) > 0) {
-  fig20 <- fig_df |>
-    mutate(scope_label = if_else(scope == "MS", "Mainstem", "North Fork"),
-           year_label  = factor(year)) |>
-    ggplot(aes(x = year_label, y = b, colour = scope_label)) +
-    geom_hline(yintercept = 1, colour = BASELINE_COL, linewidth = 0.4) +
-    geom_linerange(aes(ymin = b_lo, ymax = b_hi),
-                   position = position_dodge(width = 0.4), linewidth = 1.6, alpha = 0.9) +
-    geom_point(position = position_dodge(width = 0.4), size = 2.8) +
-    # Anchor count on the estimate itself: the interval already says the
-    # posterior is wide, this says why.
-    geom_text(aes(label = paste0(n_paired_anchors, " anchors")),
-              position = position_dodge(width = 0.4),
-              vjust = -1.4, size = 3, show.legend = FALSE) +
-    scale_colour_manual(values = c(Mainstem = CAT[["blue"]], `North Fork` = CAT[["aqua"]]),
-                        name = NULL) +
-    labs(title = "Vehicle-index bias term by fork, Sep 16 - Oct 31",
-         x = NULL, y = "b (vehicle)") +
-    theme_bss()
-
-  save_fig(fig20, "fig20_fork_scope_b", width = 8, height = 6)
-  cli_alert_success("{.file fig20_fork_scope_b}")
-} else {
-  cli_alert_info("No vehicle b available yet -- figure skipped.")
-}
-
-cli_rule()
-cli_alert_info("Tables: {.file bss_b_scope_sites.csv}, {.file bss_b_scope_effort.csv}, {.file bss_b_scope_compare.csv}")
+run_comparison()
