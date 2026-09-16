@@ -823,6 +823,63 @@ if (nrow(dwg_summ$effort_census) > 0) {
 
 ### Generate PE estimates
 
+```{r plot_census_index_ratio_daily, eval=!params$fit_only, fig.width=9, fig.height=6, fig.cap="Daily paired census-to-index ratio by angler type. Each point is one section on one day where a census count and an index count were both taken; the value is census anglers divided by the index count expanded to anglers, then divided by p_census. The season-long weighted version of this quantity is TI_expan_final in the table above, which the BSS carries as a single scalar per index channel."}
+# DAILY VERSION OF THE PE BIAS TERM.
+#
+# TI_expan_final is season-long: prep_inputs_pe_paired_census_index_counts()
+# groups by angler_final and sums count_census and count_index over the whole
+# window before dividing, so it has no date dimension and is not even per
+# section. This chunk computes the same quantity per DAY, which is what shows
+# whether the single scalar the BSS fits is a reasonable summary or is averaging
+# over a trend.
+#
+# Same two adjustments the PE term makes, or it is a different number:
+#   * index counts expanded by anglers-per-object -- without it this is
+#     objects per angler, not the bias term;
+#   * divided by p_census, the proportion of the section a census covers.
+ratio_daily <- tryCatch({
+  paired <- dwg_summ$effort_census |>
+    dplyr::inner_join(
+      dwg_summ$effort_index |> dplyr::select(-dplyr::any_of(c("fishery_name", "count_type"))),
+      by = c("section_num", "event_date", "count_sequence", "angler_final")
+    ) |>
+    dplyr::filter(!is.na(count_census), !is.na(count_index), count_index > 0)
+
+  ang_per <- interview_ang_per_object |> dplyr::select(angler_final, ang_per_object)
+  p_cen   <- census_expan |> dplyr::select(dplyr::any_of(c("angler_final", "section_num", "p_census")))
+
+  paired |>
+    dplyr::left_join(ang_per, by = "angler_final") |>
+    dplyr::left_join(p_cen, by = intersect(names(p_cen), names(paired))) |>
+    dplyr::mutate(
+      ang_per_object = dplyr::coalesce(ang_per_object, 1),
+      p_census       = dplyr::coalesce(p_census, 1),
+      ratio          = count_census / (count_index * ang_per_object) / p_census
+    ) |>
+    dplyr::filter(is.finite(ratio))
+}, error = function(e) {
+  cli::cli_alert_warning("Daily census/index ratio unavailable: {conditionMessage(e)}")
+  NULL
+})
+
+if (is.null(ratio_daily) || nrow(ratio_daily) == 0) {
+  cli::cli_alert_info("No paired census/index days -- skipping the daily ratio plot.")
+} else {
+  print(
+    ggplot(ratio_daily, aes(event_date, ratio, colour = angler_final)) +
+      geom_hline(yintercept = 1, linetype = "22", linewidth = 0.4) +
+      geom_line(aes(group = angler_final), linewidth = 0.4, alpha = 0.6) +
+      geom_point(size = 2.2) +
+      facet_wrap(~paste("Section", section_num)) +
+      scale_x_date(date_labels = "%b %d") +
+      labs(title = "Daily census-to-index ratio by angler type",
+           x = NULL, y = "census anglers / index anglers", colour = NULL) +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "bottom")
+  )
+}
+```
+
 ```{r estimates_pe, cache=params$enable_cache, dependson="prep_inputs_pe", cache.extra=param_hash}
 estimates_pe <- list() 
 

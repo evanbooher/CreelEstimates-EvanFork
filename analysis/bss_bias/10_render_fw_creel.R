@@ -55,6 +55,25 @@ source(here::here("analysis", "bss_bias", "catch_groups.R"))
 # from another, silently.
 source(here::here("analysis", "bss_bias", "scope_rules.R"))
 
+# Fork/basin scope for this run, by name from SCOPE_PRESETS in scope_rules.R.
+# Setting it does three things at once, which is the point -- they cannot be set
+# inconsistently: it resolves the sections, it switches on the scope-gated
+# window and catch-group rules, and it moves the output under its own project so
+# the MS and NF renders of the SAME fishery-year do not overwrite each other in
+# fishery_analyses/.
+if (!exists("RENDER_SCOPE_TAG", inherits = FALSE)) RENDER_SCOPE_TAG <- NULL
+if (!is.null(RENDER_SCOPE_TAG)) {
+  if (!RENDER_SCOPE_TAG %in% names(SCOPE_PRESETS)) {
+    cli::cli_abort("RENDER_SCOPE_TAG {.val {RENDER_SCOPE_TAG}} is not in {.code SCOPE_PRESETS}: \
+                    {.val {names(SCOPE_PRESETS)}}.")
+  }
+  RUN_SCOPE <- SCOPE_PRESETS[[RENDER_SCOPE_TAG]]
+  if (!exists("RENDER_PROJECT", inherits = FALSE)) {
+    RENDER_PROJECT <- paste0("bss_bias_", tolower(RENDER_SCOPE_TAG))
+  }
+}
+
+
 # The DEFAULT is the working set, not whatever was last debugged. A one-off
 # target belongs in the variable before sourcing, not here -- a narrow default
 # means a plain source() silently does less than it appears to.
@@ -276,6 +295,7 @@ if (RENDER_SKIP_DONE) {
 
 cli::cli_h1("10 -- render fw_creel.Rmd per fishery-year")
 cli::cli_alert_info("Project:  {.val {RENDER_PROJECT}}")
+cli::cli_alert_info("Scope:    {if (is.null(RENDER_SCOPE_TAG)) 'whole fishery' else RENDER_SCOPE_TAG}")
 cli::cli_alert_info("Filter:   {.val {RENDER_FISHERY_RE}}")
 cli::cli_alert_info("Report:   {if (RENDER_FIT_ONLY) 'fit only -- HTML will be near-empty' else 'full report with plots and tables'}")
 cli::cli_alert_info("Groups:   {.val {RENDER_GROUPS}} (fitted in ONE render each; zero-fish groups dropped per fishery)")

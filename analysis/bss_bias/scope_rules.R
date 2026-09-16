@@ -55,7 +55,29 @@
 
 # Empty on purpose -- see (2) above. Add an entry only for a numbering problem
 # align_bss_sections() genuinely cannot resolve, never for scope.
-SECTION_RESTRICTIONS <- list()
+SECTION_RESTRICTIONS <- list(
+  # NF 2024-25 held to section 4 ONLY, and only under the NF scope.
+  #
+  # The water-body rule resolves NF 2024-25 to sections 4, 5 and 6. Sections 5
+  # and 6 cover rm 9.5-37.5, which has no counterpart in 2025-26 at all -- so
+  # keeping them would put 28 river miles into 2024's b and nothing comparable
+  # into 2025's. Section 4 (Mouth of the NF to Cicero Bridge, rm 0-9.5) is the
+  # same census block as 2025-26's section 3, with the same three index sites.
+  #
+  # Two further reasons, both from the effort data rather than the lookup:
+  #   * s5 and s6 have ONE paired census day each in the comparison window
+  #     (Oct 22), against s4's three. They add almost no anchor.
+  #   * s6 carries TWO census blocks under one section_num (rm 24.5-30 and
+  #     30-37.5). prep_inputs_bss() sizes S, O and p_TI off section_num, so that
+  #     is not a shape the model is built for.
+  #
+  # Gated on the NF tag because it composes by INTERSECTION with whatever else
+  # applies: ungated, it would meet the MS scope's {2, 3} and resolve to
+  # nothing, aborting the MS run.
+  list(pattern   = regex("^Stillaguamish salmon and gamefish 2024-25$"),
+       scope_tag = "NF",
+       sections  = 4)
+)
 
 # Each entry holds a fishery's series to the water bodies present in EVERY year
 # of it, so `b` averages over a constant set of water:
@@ -138,6 +160,27 @@ WINDOW_RESTRICTIONS <- list(
   list(pattern = regex("^Stillaguamish salmon and gamefish 2022-23$"),
        est_date_start = "2022-09-01",
        est_date_end   = "2022-09-30",
+       trim_to_last_sampled = TRUE),
+
+  # THE FORK COMPARISON WINDOW -- Sep 16 to Oct 31, both years, scope-gated.
+  #
+  # The common period of the two years' own survey seasons: 2024-25's lookup
+  # window starts 09-16 and 2025-26's ends 10-31, so this is their intersection.
+  # Inside it the two years match almost exactly -- three paired census days per
+  # section in each (Sep 25 and Oct 5 are the same calendar dates in both), the
+  # same census blocks, and the same index sites.
+  #
+  # scope_tag keeps this OFF the whole-basin fits of the same two fishery-years,
+  # whose b feeds the collaborator brief.
+  list(pattern = regex("^Stillaguamish salmon and gamefish 2024-25$"),
+       scope_tag = c("MS", "NF"),
+       est_date_start = "2024-09-16",
+       est_date_end   = "2024-10-31",
+       trim_to_last_sampled = TRUE),
+  list(pattern = regex("^Stillaguamish salmon and gamefish 2025-26$"),
+       scope_tag = c("MS", "NF"),
+       est_date_start = "2025-09-16",
+       est_date_end   = "2025-10-31",
        trim_to_last_sampled = TRUE)
 )
 
@@ -145,7 +188,7 @@ WINDOW_RESTRICTIONS <- list(
 # First match wins; a second matching rule is an authoring error, not something
 # to silently compose, because two windows have no sensible intersection here.
 fishery_window_limit <- function(fishery_name) {
-  hits <- Filter(function(r) str_detect(fishery_name, r$pattern), WINDOW_RESTRICTIONS)
+  hits <- Filter(function(r) rule_applies(r, fishery_name), WINDOW_RESTRICTIONS)
   if (length(hits) == 0) return(NULL)
   if (length(hits) > 1) {
     cli::cli_abort(
@@ -171,13 +214,18 @@ CATCH_GROUP_EXCLUSIONS <- list(
   # No Chinook were caught in the September part of the Stillaguamish 2022-23
   # fishery, which is all that survives the window restriction above.
   list(pattern = regex("^Stillaguamish salmon and gamefish 2022-23$"),
+       groups = "chinook_all"),
+  # No Chinook reported in either fork-comparison year. Stated as a rule rather
+  # than left to 00d's inventory, which counts over the full window and would
+  # not see a group emptied by the window restriction above.
+  list(pattern = regex("^Stillaguamish salmon and gamefish 202[45]-"),
        groups = "chinook_all")
 )
 
 fishery_excluded_groups <- function(fishery_name) {
   out <- character(0)
   for (r in CATCH_GROUP_EXCLUSIONS) {
-    if (str_detect(fishery_name, r$pattern)) out <- union(out, r$groups)
+    if (rule_applies(r, fishery_name)) out <- union(out, r$groups)
   }
   out
 }
@@ -215,6 +263,31 @@ fishery_excluded_groups <- function(fishery_name) {
 # Left alone by whatever sources this file first, so 01 can set it beforehand
 # and 02a (which has no run scope) still gets a definition.
 if (!exists("RUN_SCOPE", inherits = FALSE)) RUN_SCOPE <- NULL
+
+# Named scopes, so a run is `RUN_SCOPE <- SCOPE_PRESETS$MS` rather than a
+# hand-edited regex each time -- the fork comparison needs two runs that differ
+# in exactly one field, and hand-editing is how they drift.
+SCOPE_PRESETS <- list(
+  MS = list(tag = "MS",
+            pattern = regex("Stillaguamish salmon and gamefish 202[45]-"),
+            keep    = "Stillaguamish - MS"),
+  NF = list(tag = "NF",
+            pattern = regex("Stillaguamish salmon and gamefish 202[45]-"),
+            keep    = "Stillaguamish - NF")
+)
+
+# Does a rule apply to this fishery-year, under the scope currently in force?
+#
+# `scope_tag` on a rule means "only when RUN_SCOPE has one of these tags". It is
+# what keeps the fork comparison's narrower window off the whole-basin series:
+# the same fishery_name is fitted both ways, and re-cutting the whole-basin b as
+# a side effect of a different question would silently move the numbers already
+# in the collaborator brief.
+rule_applies <- function(r, fishery_name) {
+  if (!str_detect(fishery_name, r$pattern)) return(FALSE)
+  if (is.null(r$scope_tag)) return(TRUE)
+  !is.null(RUN_SCOPE) && RUN_SCOPE$tag %in% r$scope_tag
+}
 
 # The name an output is filed under. Identical to fishery_name when RUN_SCOPE
 # is NULL or does not match, so a default run is exactly what it always was.
@@ -297,10 +370,10 @@ sections_in_water_bodies <- function(fishery_name, keep) {
 fishery_section_limit <- function(fishery_name) {
   limits <- list()
   for (r in SECTION_RESTRICTIONS) {
-    if (str_detect(fishery_name, r$pattern)) limits <- c(limits, list(as.double(r$sections)))
+    if (rule_applies(r, fishery_name)) limits <- c(limits, list(as.double(r$sections)))
   }
   for (r in WATER_BODY_RESTRICTIONS) {
-    if (str_detect(fishery_name, r$pattern)) {
+    if (rule_applies(r, fishery_name)) {
       limits <- c(limits, list(sections_in_water_bodies(fishery_name, r$keep)))
     }
   }
