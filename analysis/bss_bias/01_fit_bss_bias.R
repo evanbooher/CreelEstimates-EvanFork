@@ -223,10 +223,20 @@ if (!exists("ONLY_FISHERIES", inherits = FALSE)) ONLY_FISHERIES <- NULL
 
 # Narrow a whole run to particular water and tag its outputs, so a fork-scoped
 # fit sits alongside the whole-fishery one instead of overwriting it. NULL (the
-# default) fits every fishery-year whole. Set before scope_rules.R is sourced
-# below; see that file for the shape and for why a fork scope needs its
-# prior_contraction checked.
-RUN_SCOPE <- NULL
+# default) fits every fishery-year whole. See scope_rules.R for the shape and
+# for why a fork scope needs its prior_contraction checked.
+#
+# "Only if the caller has not" -- as for RUN_CATCH_GROUP below. This was a bare
+# assignment, so `RUN_SCOPE <- SCOPE_PRESETS$MS; source(...)` set the scope and
+# then had it wiped here, and the run went ahead whole-basin: full window, every
+# section, no tag on the outputs. Silently, because the scope banner further
+# down only prints when RUN_SCOPE is non-NULL.
+#
+# A character tag is accepted too, and resolved once scope_rules.R is sourced
+# below -- SCOPE_PRESETS does not exist yet at the point the caller sets this,
+# so `RUN_SCOPE <- "MS"` works without having to source scope_rules.R by hand
+# first.
+if (!exists("RUN_SCOPE", inherits = FALSE)) RUN_SCOPE <- NULL
 
 # Override the target catch group for a whole run. NULL keeps the per-fishery
 # rules in fishery_target_catch_group(). Set to a one-row data.frame / list with
@@ -516,6 +526,25 @@ fishery_target_catch_group <- function(fishery_name) {
 # scope_rules.R so that 02a_location_lut_changes.R reports continuity against
 # exactly the sections these fits use. See that file for each rule's basis.
 source(here::here("analysis", "bss_bias", "scope_rules.R"))
+
+# Resolve a character RUN_SCOPE now that SCOPE_PRESETS exists, and state the
+# scope either way. A run that silently loses its scope is the failure this
+# guards: it produces a complete, plausible, whole-basin result under the name
+# the scoped one should have had.
+if (is.character(RUN_SCOPE) && length(RUN_SCOPE) == 1) {
+  if (!RUN_SCOPE %in% names(SCOPE_PRESETS)) {
+    cli::cli_abort("RUN_SCOPE {.val {RUN_SCOPE}} is not in {.code SCOPE_PRESETS}: \
+                    {.val {names(SCOPE_PRESETS)}}.")
+  }
+  RUN_SCOPE <- SCOPE_PRESETS[[RUN_SCOPE]]
+}
+if (is.null(RUN_SCOPE)) {
+  cli::cli_alert_info("Run scope: whole fishery (no RUN_SCOPE set).")
+} else {
+  cli::cli_alert_info(
+    "Run scope {.val {RUN_SCOPE$tag}}: keeping {.val {RUN_SCOPE$keep}}; outputs tagged."
+  )
+}
 
 # Applied to every dwg table carrying a section_num, immediately after the fetch
 # so that preflight, prep_days() and prep_inputs_bss() all see the same reduced
