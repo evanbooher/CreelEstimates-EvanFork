@@ -192,6 +192,12 @@ kable(b_tbl)
 #| fig-cap: "Bias term estimates and 95 percent credible intervals. The dashed line marks b = 1, where index counts are an unbiased measure of effort."
 #| fig-width: 6.5
 #| fig-height: 2.8
+#| fig-dpi: 300
+# fig-dpi stays inside the `#|` block: Quarto reads cell options only up to the
+# first line that is not `#|`, so a plain comment in the middle of them drops
+# everything below it. Word embeds a raster and the default is 96 dpi, which is
+# what made the figure grainy on the page.
+#
 # Built here from bss_b_summary.csv rather than read as an image, so the figure
 # refreshes with the fits and the memo stays self-contained.
 #
@@ -220,7 +226,14 @@ if (nrow(fig_dat) > 0) {
     scale_x_log10() +
     labs(x = "Bias term b", y = NULL) +
     theme_bw(base_size = 10) +
+    # theme_bw() sets axis text to grey30. Every piece of type in the figure is
+    # black, to match the document.
     theme(panel.grid.minor = element_blank(),
+          text        = element_text(colour = "black"),
+          axis.text   = element_text(colour = "black"),
+          axis.title  = element_text(colour = "black"),
+          strip.text  = element_text(colour = "black"),
+          legend.text = element_text(colour = "black"),
           strip.background = element_rect(fill = "white", colour = "black"))
 }
 ```
