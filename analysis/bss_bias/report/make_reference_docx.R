@@ -83,12 +83,12 @@ styles_path <- file.path(xdir, "word", "styles.xml")
 doc <- read_xml(styles_path)
 ns  <- xml_ns(doc)
 
-# Font. The theme attributes win over the explicit ones where both are set, so
-# the theme attributes have to go rather than merely be overridden.
+# Font. The theme attributes outrank the explicit ones where both are set, so
+# setting w:ascii alone changes nothing -- the headings kept coming out in the
+# theme's major font. The theme attributes are stripped after serialisation
+# (see below) because xml2 will not remove a namespace-prefixed attribute:
+# `xml_attr(n, "w:asciiTheme") <- NULL` is a silent no-op.
 for (n in xml_find_all(doc, "//w:rFonts", ns)) {
-  for (a in c("w:asciiTheme", "w:hAnsiTheme", "w:cstheme", "w:eastAsiaTheme")) {
-    xml_attr(n, a) <- NULL
-  }
   xml_attr(n, "w:ascii")    <- FONT
   xml_attr(n, "w:hAnsi")    <- FONT
   xml_attr(n, "w:cs")       <- FONT
@@ -129,14 +129,43 @@ for (nm in names(HEADING_HALF)) set_style_size(nm, HEADING_HALF[[nm]])
 
 write_xml(doc, styles_path)
 
+# The theme-attribute strip, on the serialised text where the prefix is just
+# characters. 64 of them in the stock file.
+txt <- readLines(styles_path, warn = FALSE)
+txt <- gsub("[[:space:]]+w:(ascii|hAnsi|cs|eastAsia)Theme=\"[^\"]*\"", "", txt)
+writeLines(txt, styles_path)
+
+# Belt and braces: point the theme itself at Calibri, so anything still
+# resolving through majorHAnsi/minorHAnsi lands in the same place. The stock
+# theme is Aptos.
+theme_path <- file.path(xdir, "word", "theme", "theme1.xml")
+if (file.exists(theme_path)) {
+  # One string, not one per line: the element and its typeface attribute can
+  # sit on different lines, and a per-line gsub would never see the pair.
+  th <- paste(readLines(theme_path, warn = FALSE), collapse = "\n")
+  th <- gsub("(<a:(major|minor)Font>[[:space:]]*<a:latin typeface=\")[^\"]*(\")",
+             paste0("\\1", FONT, "\\3"), th)
+  writeLines(th, theme_path)
+}
+
 # ------------------------------------------------------------------------------
 # 3. Rezip
 # ------------------------------------------------------------------------------
 # Paths relative to the extraction root, or Word sees a nested folder and
 # refuses the file.
+# mode = "mirror", NOT "cherry-pick". cherry-pick adds each file at its
+# basename, which flattens word/styles.xml to styles.xml and produces a .docx
+# that Word and pandoc both reject. mirror keeps the paths relative to root.
 files <- list.files(xdir, recursive = TRUE, all.files = TRUE, no.. = TRUE)
 if (file.exists(OUT)) unlink(OUT)
-zip::zip(zipfile = OUT, files = files, root = xdir, mode = "cherry-pick")
+zip::zip(zipfile = OUT, files = files, root = xdir, mode = "mirror")
+
+# A flattened archive looks fine until Word opens it, so check the one path
+# that proves the structure survived.
+if (!"word/styles.xml" %in% zip::zip_list(OUT)$filename) {
+  stop("Built ", OUT, " but word/styles.xml is not in it -- the archive was ",
+       "flattened and Word will refuse the file.", call. = FALSE)
+}
 
 message("Wrote ", OUT)
 message("Commit it: the memo's YAML points at reference-plain.docx and will ",
