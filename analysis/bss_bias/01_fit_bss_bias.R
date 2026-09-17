@@ -210,7 +210,32 @@ FIT_CONFIGS <- list(
   # convergence at least as much as `b` does, not less. Kept only for smoke
   # testing; never for a number anyone will read.
   lite  = list(n_chain = 2, n_cores = 2, n_iter = 200,  n_warmup = 100,  n_thin = 1, adapt_delta = 0.80, max_treedepth = 10),
-  prod  = list(n_chain = 4, n_cores = 4, n_iter = 2000, n_warmup = 1000, n_thin = 1, adapt_delta = 0.95, max_treedepth = 13)
+  prod  = list(n_chain = 4, n_cores = 4, n_iter = 2000, n_warmup = 1000, n_thin = 1, adapt_delta = 0.95, max_treedepth = 13),
+
+  # For a fishery-year where `prod` is SEED-DEPENDENT rather than simply
+  # under-sampled: the same settings converge on one run and not the next, and
+  # the chains that do converge agree on where the mode is. That is chains
+  # failing to reach a region, not curvature, so the levers are the ones that
+  # help a chain get there and stay:
+  #
+  #   n_warmup 2500  -- the main one. A chain that starts badly has to find the
+  #                     typical set before it can adapt to it, and 1000 is not
+  #                     much when the posterior has an awkward region.
+  #   init "random"  -- every other config starts all chains at 0 on the
+  #                     unconstrained scale, so they share a basin and differ
+  #                     only by momentum. Dispersed starts let the chains
+  #                     actually disagree, which is what makes rhat informative
+  #                     about modes rather than about luck.
+  #   max_treedepth 14 -- a chain saturating the depth limit cannot traverse far
+  #                     per iteration, which is how one gets stuck.
+  #   adapt_delta 0.99 -- smaller steps through the tight part; also clears the
+  #                     handful of divergences prod leaves.
+  #   6 chains       -- more independent reads on whether a second mode exists.
+  #
+  # Slower than prod and NOT the default for anything. If a fishery-year still
+  # will not converge under this, the sampler is not the problem.
+  prod_hard = list(n_chain = 6, n_cores = 6, n_iter = 4000, n_warmup = 2500, n_thin = 1,
+                   adapt_delta = 0.99, max_treedepth = 14, init = "random")
 )
 if (!exists("FIT_CONFIG_NAME", inherits = FALSE)) FIT_CONFIG_NAME <- "quick"   # <-- default is the fast/throwaway config; change to "quick" once smoke passes, "prod" for backfill later
 
@@ -980,7 +1005,7 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
       model_file_name = BSS_MODEL_FILE, bss_inputs_list = inputs_bss,
       n_chain = cfg$n_chain, n_cores = cfg$n_cores, n_iter = cfg$n_iter, n_warmup = cfg$n_warmup,
       n_thin = cfg$n_thin, adapt_delta = cfg$adapt_delta, max_treedepth = cfg$max_treedepth,
-      init = "0", pars = MONITOR_PARS, include = TRUE
+      init = cfg$init %||% "0", pars = MONITOR_PARS, include = TRUE
     )
   })
   runtime_sec <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
