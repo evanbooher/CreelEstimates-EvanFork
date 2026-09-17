@@ -58,7 +58,15 @@ FITS <- tibble::tribble(
   "North Fork 2024", "NF",   "Stillaguamish salmon and gamefish 2024-25",  "Stillaguamish - NF",
   "North Fork 2025", "NF",   "Stillaguamish salmon and gamefish 2025-26",  "Stillaguamish - NF"
 ) |>
-  mutate(out_name = paste0(fishery_name, " [", scope, "]"))
+  mutate(
+    out_name = paste0(fishery_name, " [", scope, "]"),
+    # 12_fork_scope_compare.R keys its outputs on "<scope> <year>" -- "MS 2024"
+    # -- not on the display label used in this memo. Joining the counts on
+    # `fit` therefore matched nothing and every count column rendered as an em
+    # dash while the file sat there full of numbers. Derived the same way 12
+    # derives it, so the two cannot drift.
+    scope_fit = paste(scope, as.integer(str_extract(fishery_name, "\\d{4}")))
+  )
 
 # Census reach names and river miles, from the committed lookup. Names rather
 # than section numbers because the numbers are not stable between years: the
@@ -165,7 +173,7 @@ counts <- FITS |>
     if (is.null(effort)) tibble(fit = character()) else
       effort |> select(fit, n_index_sites, n_index_days, n_paired_anchors,
                        census_anglers_bank, census_anglers_boat),
-    by = "fit"
+    by = c("scope_fit" = "fit")
   ) |>
   transmute(
     Fit = fit,
@@ -191,7 +199,7 @@ b_tbl <- FITS |>
   left_join(
     if (is.null(effort)) tibble(fit = character()) else
       effort |> select(fit, census_anglers_boat, n_paired_anchors),
-    by = "fit"
+    by = c("scope_fit" = "fit")
   ) |>
   mutate(
     limitation = case_when(
@@ -216,7 +224,12 @@ kable(b_tbl)
 
 ```{r trailer-note, results = "asis"}
 if (!is.null(effort)) {
-  thin <- effort |> filter(census_anglers_boat < CENSUS_BOAT_FLOOR)
+  # Through FITS, so the prose names the fishery-years the same way the tables
+  # above do rather than falling back to the "MS 2024" scope tag.
+  thin <- FITS |>
+    inner_join(effort |> select(fit, census_anglers_boat),
+               by = c("scope_fit" = "fit")) |>
+    filter(census_anglers_boat < CENSUS_BOAT_FLOOR)
   if (nrow(thin) > 0) {
     cat(sprintf(
       paste0("Trailer bias terms are not reported. Fewer than %d boat anglers were ",

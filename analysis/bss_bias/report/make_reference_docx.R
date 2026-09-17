@@ -38,9 +38,10 @@ OUT        <- file.path(REPORT_DIR, "reference-plain.docx")
 FONT      <- "Calibri"
 BODY_HALF <- 22L   # half-points, so 11 pt
 
-# Headings differ from body by weight, and only the title by size. Anything
-# more and Word re-introduces the visual hierarchy the memo does not want.
-HEADING_HALF <- c(Title = 28L, Heading1 = 22L, Heading2 = 22L, Heading3 = 22L)
+# ONE SIZE, title included. Headings and the title differ from body text by
+# weight alone. Leaving the title at 14 pt was still two sizes on the page.
+HEADING_HALF <- c(Title = BODY_HALF, Heading1 = BODY_HALF,
+                  Heading2 = BODY_HALF, Heading3 = BODY_HALF)
 
 # ------------------------------------------------------------------------------
 # 1. Dump the stock reference doc
