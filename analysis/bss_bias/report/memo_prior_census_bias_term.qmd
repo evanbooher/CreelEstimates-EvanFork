@@ -2,7 +2,10 @@
 title: "Using prior census data to set the effort-index bias term"
 date: 2026-09-16
 format:
-  docx: default
+  docx:
+    # Calibri, black, one body size. Built by make_reference_docx.R -- run that
+    # once and commit the result; without the file the docx render fails.
+    reference-doc: reference-plain.docx
   html:
     embed-resources: true
     toc: false
@@ -57,18 +60,46 @@ FITS <- tibble::tribble(
 # Census reach names and river miles, from the committed lookup. Names rather
 # than section numbers because the numbers are not stable between years: the
 # same mainstem water is sections 2 and 3 in 2024 and 1 and 2 in 2025.
+#
+# RESTRICTED TO THE SECTIONS ACTUALLY FITTED. Listing every section of a fork
+# put four census blocks and 37 river miles against North Fork 2024, which is
+# held to section 4 alone -- the table then described water the estimate does
+# not cover. scope_rules.R is the same file the fits read, so the two cannot
+# disagree.
+source(here::here("analysis", "bss_bias", "scope_rules.R"))
+
 reaches <- if (file.exists(LUT)) {
   readr::read_csv(LUT, show_col_types = FALSE) |>
     filter(location_type == "Section") |>
     distinct(fishery_name, water_body_code, section_num, location_code, lower_rm, upper_rm) |>
-    mutate(across(c(lower_rm, upper_rm), ~suppressWarnings(as.numeric(.x))))
+    mutate(section_num = suppressWarnings(as.numeric(section_num)),
+           across(c(lower_rm, upper_rm), ~suppressWarnings(as.numeric(.x))))
 } else NULL
 
-reach_label <- function(fn, wb) {
-  if (is.null(reaches)) return(NA_character_)
-  r <- reaches |> filter(fishery_name == fn, water_body_code == wb) |> arrange(lower_rm)
-  if (nrow(r) == 0) return(NA_character_)
-  paste(sprintf("%s (%.3g–%.3g)", r$location_code, r$lower_rm, r$upper_rm), collapse = "; ")
+fitted_sections <- function(fn, tag) {
+  # scope_rules.R narrates what it drops through cli, which knitr would lift
+  # into the rendered table. Capture it: the rule is what we want, not its
+  # commentary.
+  RUN_SCOPE <<- SCOPE_PRESETS[[tag]]
+  out <- NULL
+  invisible(utils::capture.output(
+    out <- tryCatch(suppressMessages(fishery_section_limit(fn)),
+                    error = function(e) NULL),
+    type = "output"))
+  RUN_SCOPE <<- NULL
+  out
+}
+
+reach_rows <- function(fit, fn, wb, tag) {
+  if (is.null(reaches)) return(NULL)
+  keep <- fitted_sections(fn, tag)
+  r <- reaches |> filter(fishery_name == fn, water_body_code == wb)
+  if (!is.null(keep)) r <- r |> filter(section_num %in% keep)
+  if (nrow(r) == 0) return(NULL)
+  r |> arrange(lower_rm) |>
+    transmute(Fit = fit,
+              `Census reach` = location_code,
+              `River mile` = paste0(signif(lower_rm, 3), "-", signif(upper_rm, 3)))
 }
 
 fmt <- function(x, d = 2) ifelse(is.na(x), "—", formatC(x, format = "f", digits = d))
@@ -115,9 +146,20 @@ covers. The two years describe the same reaches, surveyed from the same access
 sites, so a difference in b can be read as a difference rather than an artifact
 of coverage.
 
-```{r survey-table}
-survey <- FITS |>
-  mutate(`Census reach (river mile)` = map2_chr(fishery_name, water_body, reach_label)) |>
+```{r reach-table}
+# TWO NARROW TABLES, not one wide one. A single table carrying the reach names
+# alongside six count columns forced Word to wrap every numeric header one
+# character per line.
+reach_tbl <- bind_rows(pmap(
+  list(FITS$fit, FITS$fishery_name, FITS$water_body, FITS$scope), reach_rows))
+
+if (nrow(reach_tbl) > 0) kable(reach_tbl)
+```
+
+The same reaches are surveyed in both years; only the section numbering differs.
+
+```{r count-table}
+counts <- FITS |>
   left_join(
     if (is.null(effort)) tibble(fit = character()) else
       effort |> select(fit, n_index_sites, n_index_days, n_paired_anchors,
@@ -126,16 +168,19 @@ survey <- FITS |>
   ) |>
   transmute(
     Fit = fit,
-    `Census reach (river mile)`,
-    `Index sites`          = n_fmt(n_index_sites),
-    `Index days`           = n_fmt(n_index_days),
-    `Paired census days`   = n_fmt(n_paired_anchors),
-    `Census anglers, bank` = n_fmt(census_anglers_bank),
-    `Census anglers, boat` = n_fmt(census_anglers_boat)
+    `Index sites`  = n_fmt(n_index_sites),
+    `Index days`   = n_fmt(n_index_days),
+    `Census days`  = n_fmt(n_paired_anchors),
+    `Bank anglers` = n_fmt(census_anglers_bank),
+    `Boat anglers` = n_fmt(census_anglers_boat)
   )
 
-kable(survey)
+kable(counts)
 ```
+
+Census days are days carrying both a census and an index count in the same
+section; a census count with no paired index count does not inform b. Bank and
+boat anglers are the totals counted in census across the window.
 
 The index sites are the same named access points in both years. The upper North
 Fork above Cicero Bridge and the South Fork were surveyed in 2024 and not in
@@ -161,6 +206,7 @@ b_tbl <- FITS |>
       informed_flag == "unconverged"     ~ "Did not converge",
       informed_flag == "prior-dominated" ~ "Posterior tracks the prior",
       informed_flag == "weak"            ~ "Few angler interviews",
+      is.na(n_paired_anchors)            ~ "not yet summarised",
       TRUE                               ~ paste0(n_paired_anchors, " paired census days")
     )
   ) |>
