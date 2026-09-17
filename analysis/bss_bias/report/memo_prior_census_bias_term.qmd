@@ -1,0 +1,252 @@
+---
+title: "Using prior census data to set the effort-index bias term"
+date: 2026-09-16
+format:
+  docx: default
+  html:
+    embed-resources: true
+    toc: false
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+# ==============================================================================
+# The memo's numbers come from the modelling outputs, not from the prose.
+#
+# Nothing below is typed in. The b estimates and intervals are read from
+# bss_b_summary.csv (written by 01_fit_bss_bias.R), the survey counts from
+# bss_b_scope_effort.csv and bss_b_scope_sites.csv (12_fork_scope_compare.R),
+# and the census reach names and river miles from the committed location
+# lookup. Re-render after a refit and the memo is current.
+#
+# kable(), not gt(): gt does not render to Word, and this memo is edited in
+# Word. The same file produces .docx and .html.
+# ==============================================================================
+library(tidyverse)
+library(knitr)
+
+OUT_DIR <- here::here("analysis", "bss_bias", "outputs")
+LUT     <- here::here("analysis", "bss_bias", "lookup", "fishery_location_lut.csv")
+
+# Boat anglers in census below which the trailer term is called data-limited.
+# Same value 12_fork_scope_compare.R uses, restated rather than sourced so the
+# memo renders without running that script.
+CENSUS_BOAT_FLOOR <- 20
+
+read_if <- function(f) {
+  p <- file.path(OUT_DIR, f)
+  if (file.exists(p)) readr::read_csv(p, show_col_types = FALSE) else NULL
+}
+
+b_all  <- read_if("bss_b_summary.csv")
+effort <- read_if("bss_b_scope_effort.csv")
+sites  <- read_if("bss_b_scope_sites.csv")
+
+FITS <- tibble::tribble(
+  ~fit,              ~scope, ~fishery_name,                                ~water_body,
+  "Mainstem 2024",   "MS",   "Stillaguamish salmon and gamefish 2024-25",  "Stillaguamish - MS",
+  "Mainstem 2025",   "MS",   "Stillaguamish salmon and gamefish 2025-26",  "Stillaguamish - MS",
+  "North Fork 2024", "NF",   "Stillaguamish salmon and gamefish 2024-25",  "Stillaguamish - NF",
+  "North Fork 2025", "NF",   "Stillaguamish salmon and gamefish 2025-26",  "Stillaguamish - NF"
+) |>
+  mutate(out_name = paste0(fishery_name, " [", scope, "]"))
+
+# Census reach names and river miles, from the committed lookup. Names rather
+# than section numbers because the numbers are not stable between years: the
+# same mainstem water is sections 2 and 3 in 2024 and 1 and 2 in 2025.
+reaches <- if (file.exists(LUT)) {
+  readr::read_csv(LUT, show_col_types = FALSE) |>
+    filter(location_type == "Section") |>
+    distinct(fishery_name, water_body_code, section_num, location_code, lower_rm, upper_rm) |>
+    mutate(across(c(lower_rm, upper_rm), ~suppressWarnings(as.numeric(.x))))
+} else NULL
+
+reach_label <- function(fn, wb) {
+  if (is.null(reaches)) return(NA_character_)
+  r <- reaches |> filter(fishery_name == fn, water_body_code == wb) |> arrange(lower_rm)
+  if (nrow(r) == 0) return(NA_character_)
+  paste(sprintf("%s (%.3g–%.3g)", r$location_code, r$lower_rm, r$upper_rm), collapse = "; ")
+}
+
+fmt <- function(x, d = 2) ifelse(is.na(x), "—", formatC(x, format = "f", digits = d))
+n_fmt <- function(x) ifelse(is.na(x), "—", formatC(x, format = "d", big.mark = ","))
+
+have_fits <- !is.null(b_all) &&
+  any(FITS$out_name %in% b_all$fishery_name[b_all$bias_type == "vehicle"])
+```
+
+Technical memo describing proposed modifications to effort bias-correction
+approach for Snohomish and Stillaguamish basin freshwater fishery monitoring for
+2026.
+
+Following the elimination of WDFW's District 13 freshwater salmon harvest
+monitoring budget, aerial census counts (also known as tie-in counts) are not
+funded for the Snohomish and Stillaguamish mainstem and North Fork Stillaguamish
+gamefish fishery in 2026. These surveys are used to estimate a census-index bias
+parameter (b), which corrects for under- or overcounts of anglers obtained
+during index counts of vehicles and boat trailers at access sites. Measuring it
+requires census counts run alongside index counts on the same day, time, and
+river section. Without either in-season census counts or an informative prior on
+the creel model's b parameter, the index counts of vehicles and trailers would be
+assumed to be an unbiased measure of fishing effort. Where census are reduced or
+eliminated this season, WDFW proposes to use historical data for census-index
+effort bias terms from prior years to inform the bias correction used in the
+current year.
+
+## Proposed action
+
+Use bias terms for vehicle and trailer index counts from the fishery's own prior
+years, matching a comparable temporal and spatial footprint to the 2026 fishery,
+with a distribution wide enough to span the year-to-year variation observed.
+
+```{r pending-note, results = "asis"}
+if (!have_fits) {
+  cat("TO BE COMPLETED when the current fits finish. Bias term values below are",
+      "not yet available.\n")
+}
+```
+
+The two most recent Stillaguamish seasons were compared on a common window,
+September 16th to October 31st, restricted to the water each fork actually
+covers. The two years describe the same reaches, surveyed from the same access
+sites, so a difference in b can be read as a difference rather than an artifact
+of coverage.
+
+```{r survey-table}
+survey <- FITS |>
+  mutate(`Census reach (river mile)` = map2_chr(fishery_name, water_body, reach_label)) |>
+  left_join(
+    if (is.null(effort)) tibble(fit = character()) else
+      effort |> select(fit, n_index_sites, n_index_days, n_paired_anchors,
+                       census_anglers_bank, census_anglers_boat),
+    by = "fit"
+  ) |>
+  transmute(
+    Fit = fit,
+    `Census reach (river mile)`,
+    `Index sites`          = n_fmt(n_index_sites),
+    `Index days`           = n_fmt(n_index_days),
+    `Paired census days`   = n_fmt(n_paired_anchors),
+    `Census anglers, bank` = n_fmt(census_anglers_bank),
+    `Census anglers, boat` = n_fmt(census_anglers_boat)
+  )
+
+kable(survey)
+```
+
+The index sites are the same named access points in both years. The upper North
+Fork above Cicero Bridge and the South Fork were surveyed in 2024 and not in
+2025, and are excluded from both years for that reason.
+
+```{r b-table}
+b_tbl <- FITS |>
+  left_join(
+    if (is.null(b_all)) tibble(out_name = character()) else
+      b_all |> filter(bias_type == "vehicle") |>
+        select(out_name = fishery_name, median, q2.5, q97.5, informed_flag,
+               prior_contraction),
+    by = "out_name"
+  ) |>
+  left_join(
+    if (is.null(effort)) tibble(fit = character()) else
+      effort |> select(fit, census_anglers_boat, n_paired_anchors),
+    by = "fit"
+  ) |>
+  mutate(
+    limitation = case_when(
+      is.na(median)                      ~ "Not yet fitted",
+      informed_flag == "unconverged"     ~ "Did not converge",
+      informed_flag == "prior-dominated" ~ "Posterior tracks the prior",
+      informed_flag == "weak"            ~ "Few angler interviews",
+      TRUE                               ~ paste0(n_paired_anchors, " paired census days")
+    )
+  ) |>
+  transmute(
+    Fit = fit,
+    `Vehicle b` = fmt(median),
+    `95 percent interval` = ifelse(is.na(median), "—",
+                                   paste0(fmt(q2.5), "–", fmt(q97.5))),
+    `Data limitation` = limitation
+  )
+
+kable(b_tbl)
+```
+
+```{r trailer-note, results = "asis"}
+if (!is.null(effort)) {
+  thin <- effort |> filter(census_anglers_boat < CENSUS_BOAT_FLOOR)
+  if (nrow(thin) > 0) {
+    cat(sprintf(
+      paste0("Trailer bias terms are not reported. Fewer than %d boat anglers were ",
+             "counted in census in each of these fishery-years (%s), and the trailer ",
+             "index is measured against boat anglers in census rather than against ",
+             "trailers counted.\n"),
+      CENSUS_BOAT_FLOOR,
+      paste(sprintf("%s: %d", thin$fit, as.integer(thin$census_anglers_boat)), collapse = "; ")
+    ))
+  }
+}
+```
+
+## Proposed approach for this season
+
+**Vehicle term.** Place a lognormal prior on b, centred on the pooled estimate
+from that fishery's own prior years and given a spread taken from the observed
+year-to-year variation in those same estimates, widened by the leave-one-out
+prediction interval for that series where more than two years are available.
+
+The distinction matters: a single year's posterior can be narrow while the
+year-to-year variation is wide, and it is the year-to-year variation that
+describes what an unmeasured year might be.
+
+```{r spread-evidence, results = "asis"}
+ms <- FITS |>
+  filter(scope == "MS") |>
+  left_join(
+    if (is.null(b_all)) tibble(out_name = character()) else
+      b_all |> filter(bias_type == "vehicle") |>
+        select(out_name = fishery_name, median, q2.5, q97.5, informed_flag),
+    by = "out_name"
+  ) |>
+  filter(!is.na(median), informed_flag != "unconverged")
+
+if (nrow(ms) == 2) {
+  lo <- ms |> slice_min(median); hi <- ms |> slice_max(median)
+  cat(sprintf(
+    paste0("The mainstem is the clearest case. Its vehicle term was %s in %s and %s in ",
+           "%s, on the same two reaches, the same %s access sites, and three paired ",
+           "census days in each year. The two 95 percent intervals (%s–%s and ",
+           "%s–%s) do not overlap. Carrying the %s value into %s unchanged would ",
+           "have understated estimated catch and effort by about %.0f percent, because ",
+           "catch scales as 1/b.\n"),
+    fmt(hi$median), str_extract(hi$fit, "\\d{4}"),
+    fmt(lo$median), str_extract(lo$fit, "\\d{4}"),
+    if (is.null(effort)) "same" else
+      n_fmt(effort$n_index_sites[match(hi$fit, effort$fit)]),
+    fmt(hi$q2.5), fmt(hi$q97.5), fmt(lo$q2.5), fmt(lo$q97.5),
+    str_extract(hi$fit, "\\d{4}"), str_extract(lo$fit, "\\d{4}"),
+    100 * (1 - lo$median / hi$median)
+  ))
+}
+```
+
+**Trailer term.** Fix at 1 where census boat-angler coverage falls below the
+threshold used in the comparison above. This is a stated assumption, not an
+estimate, and it is reported as such. In a fishery that is 2 to 3 percent boat
+effort, the choice moves the season total very little, and the alternative is a
+number with no data behind it.
+
+**Where census is collected this season.** The prior and the census data combine
+in the usual way, and the census will dominate wherever it is adequate. The prior
+is what keeps the estimate stable where it is not.
+
+```{r sources, results = "asis"}
+stamp <- file.info(file.path(OUT_DIR, "bss_b_summary.csv"))$mtime
+cat("\n---\n\n*Bias term estimates and survey counts in this memo are read directly from ",
+    "the modelling outputs in `analysis/bss_bias/outputs/`",
+    if (!is.na(stamp)) paste0(" (fits last written ", format(stamp, "%Y-%m-%d %H:%M"), ")") else "",
+    ". Re-render to refresh.*\n", sep = "")
+```
