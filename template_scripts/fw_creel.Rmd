@@ -872,8 +872,7 @@ if (is.null(ratio_daily) || nrow(ratio_daily) == 0) {
       geom_point(size = 2.2) +
       facet_wrap(~paste("Section", section_num)) +
       scale_x_date(date_labels = "%b %d") +
-      labs(title = "Daily census-to-index ratio by angler type",
-           x = NULL, y = "census anglers / index anglers", colour = NULL) +
+      labs(x = NULL, y = "census anglers / index anglers", colour = NULL) +
       theme_minimal(base_size = 11) +
       theme(legend.position = "bottom")
   )
