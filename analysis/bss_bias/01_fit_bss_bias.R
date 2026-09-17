@@ -255,6 +255,18 @@ if (!exists("RUN_CATCH_GROUP", inherits = FALSE)) RUN_CATCH_GROUP <- NULL
 # b_draws -- it would duplicate every series and double the year counts in 06.
 if (!exists("CATCH_BASELINE_ONLY", inherits = FALSE)) CATCH_BASELINE_ONLY <- FALSE
 
+# Whether a fishery-year with NO fish in the target catch group is skipped.
+#
+# It depends entirely on what the run is FOR. A catch-baseline run exists to
+# produce C_sum, so a group with no fish has nothing to produce and is skipped.
+# A `b` run does not touch the catch sub-model: b is invariant to the catch
+# group, so zero fish is no obstacle and skipping throws away a perfectly good
+# bias term. Defaulting to CATCH_BASELINE_ONLY encodes that rather than leaving
+# it to be remembered.
+if (!exists("REQUIRE_CATCH_FOR_FIT", inherits = FALSE)) {
+  REQUIRE_CATCH_FOR_FIT <- CATCH_BASELINE_ONLY
+}
+
 SAVE_FITS <- FALSE   # TRUE keeps the full stanfit per fishery-year (large!); the small
                       # b-summary + draws are the actual deliverable and are always saved.
 
@@ -716,10 +728,25 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
   n_fish_ecg <- sum(interview_plus_catch$fish_count[interview_plus_catch$est_cg == chosen_ecg],
                     na.rm = TRUE)
   if (!chosen_ecg %in% interview_plus_catch$est_cg || n_fish_ecg <= 0) {
-    skip_fishery(paste0("Target catch group ('", chosen_ecg, "') has no fish recorded for '",
-                         fishery_name, "' -- zero is a RESULT, carried through by 07 from the ",
-                         "00d inventory. Nothing to fit."),
-                 stage = "choose_ecg")
+    if (REQUIRE_CATCH_FOR_FIT) {
+      skip_fishery(paste0("Target catch group ('", chosen_ecg, "') has no fish recorded for '",
+                           fishery_name, "' -- zero is a RESULT, carried through by 07 from the ",
+                           "00d inventory. Nothing to fit."),
+                   stage = "choose_ecg")
+    }
+    # `b` is invariant to the catch group: the effort and catch sub-models share
+    # no parameters, and prep_dwg_interview_catch() keeps every interview at
+    # fish_count = 0 rather than subsetting. So a group with no fish costs the
+    # CATCH estimate its meaning and leaves the bias term untouched -- which is
+    # the whole output of a b run.
+    #
+    # Skipping here took out both North Fork Stillaguamish scopes: no coho
+    # harvest was recorded in that reach inside the comparison window, and the
+    # b estimates the run existed to produce were discarded with it.
+    cli::cli_alert_warning(
+      "  No fish recorded for {.val {chosen_ecg}} -- fitting anyway for the bias term. \
+       Catch output from this fit is not an estimate of anything."
+    )
   }
 
   effort_index_summ <- run_stage("effort_index", {
