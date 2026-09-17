@@ -507,6 +507,14 @@ append_csv_row <- function(row_df, path, key_cols = "fishery_name") {
 # ------------------------------------------------------------------------------
 
 fishery_target_catch_group <- function(fishery_name) {
+  # A scope that names its own target catch group supplies one, unless the
+  # caller set RUN_CATCH_GROUP explicitly. The right target differs by reach --
+  # coho harvest on the mainstem, cutthroat in the North Fork -- and carrying it
+  # on the scope means the two runs cannot be given the wrong one by omission.
+  if (is.null(RUN_CATCH_GROUP) && !is.null(RUN_SCOPE$catch_group) &&
+      str_detect(fishery_name, RUN_SCOPE$pattern)) {
+    return(RUN_SCOPE$catch_group[c("species", "life_stage", "fin_mark", "fate")])
+  }
   # A run-level override wins over every name rule below.
   if (!is.null(RUN_CATCH_GROUP)) {
     g <- as.list(RUN_CATCH_GROUP)

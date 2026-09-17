@@ -267,13 +267,28 @@ if (!exists("RUN_SCOPE", inherits = FALSE)) RUN_SCOPE <- NULL
 # Named scopes, so a run is `RUN_SCOPE <- SCOPE_PRESETS$MS` rather than a
 # hand-edited regex each time -- the fork comparison needs two runs that differ
 # in exactly one field, and hand-editing is how they drift.
+#
+# `catch_group` is optional and only affects which catch the fit reports beside
+# b; b itself is invariant to it. It is here because the right target differs by
+# reach: the mainstem fishery is coho harvest, while the North Fork records no
+# coho harvest in this window and is a cutthroat fishery. Fitting the NF against
+# a group with no fish works -- b is unaffected -- but reports a meaningless
+# zero catch, and naming the real group makes the render worth reading.
 SCOPE_PRESETS <- list(
   MS = list(tag = "MS",
             pattern = regex("Stillaguamish salmon and gamefish 202[45]-"),
-            keep    = "Stillaguamish - MS"),
+            keep    = "Stillaguamish - MS",
+            catch_group = list(species    = "Coho",
+                               life_stage = "Adult|Jack",
+                               fin_mark   = "UM|AD",
+                               fate       = "Kept")),
   NF = list(tag = "NF",
             pattern = regex("Stillaguamish salmon and gamefish 202[45]-"),
-            keep    = "Stillaguamish - NF")
+            keep    = "Stillaguamish - NF",
+            catch_group = list(species    = "Coastal Cutthroat",
+                               life_stage = "NA",
+                               fin_mark   = "NA|UM|UNK",
+                               fate       = "Released"))
 )
 
 # Does a rule apply to this fishery-year, under the scope currently in force?
