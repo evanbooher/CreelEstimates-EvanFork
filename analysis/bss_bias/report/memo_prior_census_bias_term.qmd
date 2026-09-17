@@ -117,11 +117,11 @@ bias-correction approach for Snohomish and Stillaguamish basin
 freshwater fishery monitoring for 2026.
 
 Following the elimination of WDFW's District 13 freshwater salmon
-harvest monitoring budget, aerial census counts (also known as tie-in
+harvest monitoring budget, aerial census effort counts (also known as tie-in
 counts) are not funded for the Snohomish and Stillaguamish mainstem and
 North Fork Stillaguamish gamefish fishery in 2026. These surveys are
 used to estimate a census-index bias parameter (b), which corrects for
-under- or overcounts of anglers obtained during index counts of vehicles
+under or overcounts of anglers obtained during index counts of vehicles
 and boat trailers at access sites. Measuring it requires census counts
 run alongside index counts on the same day, time, and river section.
 Without either in-season census counts or an informative prior on the
@@ -133,10 +133,10 @@ inform the bias correction used in the current year.
 
 ## Proposed action
 
-Use bias terms for vehicle and trailer index counts from the fishery's
-own prior years, matching a comparable temporal and spatial footprint to
-the 2026 fishery, with a distribution wide enough to span the
-year-to-year variation observed.
+We propose to use bias terms for vehicle and trailer index counts from the fishery's
+own prior years, matched to a comparable temporal and spatial footprint of
+the 2026 fishery. The distribution of a historical bias term should be wide enough to span the
+year-to-year variation observed in the past.
 
 ```{r pending-note, results = "asis"}
 if (!have_fits) {
@@ -147,7 +147,7 @@ if (!have_fits) {
 
 The two most recent Stillaguamish seasons were compared on a common
 window, September 16th to October 31st, restricted to sections in the
-mainstem and North Fork Stillaguamish Rivers .
+mainstem and North Fork Stillaguamish Rivers. The same reaches were surveyed in both years. 
 
 ```{r reach-table}
 # TWO NARROW TABLES, not one wide one. A single table carrying the reach names
@@ -158,8 +158,6 @@ reach_tbl <- bind_rows(pmap(
 
 if (nrow(reach_tbl) > 0) kable(reach_tbl)
 ```
-
-The same reaches are surveyed in both years; only the section numbering differs.
 
 ```{r count-table}
 counts <- FITS |>
@@ -234,15 +232,9 @@ if (!is.null(effort)) {
 
 ## Proposed approach for this season
 
-**Vehicle term.** Place a lognormal prior on b, centred on the pooled
+For 2026 vehicle and trailer bias terms in the creel model, place a lognormal prior on b, centered on the pooled
 estimate from that fishery's own prior years and given a spread taken
-from the observed year-to-year variation in those same estimates,
-widened by the leave-one-out prediction interval for that series where
-more than two years are available.
-
-The distinction matters: a single year's posterior can be narrow while
-the year-to-year variation is wide, and it is the year-to-year variation
-that describes what an unmeasured year might be.
+from the observed year-to-year variation in those same estimates. 
 
 ```{r spread-evidence, results = "asis"}
 ms <- FITS |>
@@ -275,15 +267,9 @@ if (nrow(ms) == 2) {
 }
 ```
 
-**Trailer term.** Fix at 1 where census boat-angler coverage falls below
-the threshold used in the comparison above. This is a stated assumption,
-not an estimate, and it is reported as such. In a fishery that is 2 to 3
-percent boat effort, the choice moves the season total very little, and
-the alternative is a number with no data behind it.
-
-**Where census is collected this season.** The prior and the census data
-combine in the usual way, and the census will dominate wherever it is
-adequate. The prior is what keeps the estimate stable where it is not.
+If any census data is collected this season, the prior and the census data
+would combine, and the census will update whenever there is
+adequate data.
 
 ```{r sources, results = "asis"}
 stamp <- file.info(file.path(OUT_DIR, "bss_b_summary.csv"))$mtime
