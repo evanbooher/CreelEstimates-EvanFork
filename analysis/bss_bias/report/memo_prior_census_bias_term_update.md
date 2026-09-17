@@ -49,14 +49,18 @@ Two qualifications belong with these figures. Every historical year in the test 
 
 TO BE COMPLETED when the current fits finish. Values below are placeholders.
 
-The two most recent Stillaguamish seasons were compared on a common window, 16 September to 31 October, restricted to the water each fork actually covers. The two years match closely enough that a difference in b can be read as a difference rather than an artifact of coverage: the same census blocks, the same index sites, and three paired census days in each.
+The two most recent Stillaguamish seasons were compared on a common window, 16 September to 31 October, restricted to the water each fork actually covers. The two years describe the same reaches, surveyed from the same access sites, so a difference in b can be read as a difference rather than an artifact of coverage.
 
-| Fit | Sections | Index days | Paired census days | Census anglers, bank | Census anglers, boat |
-| --- | --- | --- | --- | --- | --- |
-| Mainstem 2024 | 2, 3 | 24 | 3 | 145 | 0 |
-| Mainstem 2025 | 1, 2 | 24 | 3 | 227 | 15 |
-| North Fork 2024 | 4 | 25 | 3 | 7 | 2 |
-| North Fork 2025 | 3 | 28 | 3 | 12 | 0 |
+Reaches are named rather than numbered below because the section numbers are not stable between years: the same water is section 2 and 3 in 2024 and section 1 and 2 in 2025, and the North Fork reach is section 4 in 2024 and section 3 in 2025. The numbers are labels that get redrawn; the reaches are what is being compared.
+
+| Fit | Census reach (river mile) | Index sites | Index days | Paired census days | Census anglers, bank | Census anglers, boat |
+| --- | --- | --- | --- | --- | --- | --- |
+| Mainstem 2024 | Marine Dr to I5 (1.5–11); I5 to forks confluence (11–17.7) | 12 | 24 | 3 | 145 | 0 |
+| Mainstem 2025 | Marine Dr to I5 (1.5–11); I5 to forks confluence (11–17.7) | 12 | 24 | 3 | 227 | 15 |
+| North Fork 2024 | Mouth of the North Fork to Cicero Bridge (0–9.5) | 3 | 25 | 3 | 7 | 2 |
+| North Fork 2025 | Mouth of the North Fork to Cicero Bridge (0–9.5) | 3 | 28 | 3 | 12 | 0 |
+
+The index sites are the same named access points in both years: Hevly, Larson Rd Bridge, Mainstem Stilly Access, Norman Guardrail hole, Old Stilly River Bridge, Pilchuck Creek Mouth, RR Overpass and STI Trail in the lower mainstem; Blue Stilly Park, Haller Park, I5 Bridge and Twin Rivers Park in the upper; Cicero Bridge, Cloverdale Park and Trafton Access in the North Fork. The upper North Fork above Cicero Bridge and the South Fork were surveyed in 2024 and not in 2025, and are excluded from both years for that reason.
 
 The survey totals are the constraint, and they are known independently of any model fit. Each estimate rests on three days that carry both a census and an index count. The North Fork rests on 7 and 12 anglers counted in census across the whole window, and no fit can add information the survey did not collect. Boat anglers in census are what the trailer term is measured against, and there are 0 to 15 of them in each fishery-year.
 
