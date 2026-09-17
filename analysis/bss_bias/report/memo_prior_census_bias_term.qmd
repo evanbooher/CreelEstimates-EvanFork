@@ -37,11 +37,6 @@ library(knitr)
 OUT_DIR <- here::here("analysis", "bss_bias", "outputs")
 LUT     <- here::here("analysis", "bss_bias", "lookup", "fishery_location_lut.csv")
 
-# Boat anglers in census below which the trailer term is called data-limited.
-# Same value 12_fork_scope_compare.R uses, restated rather than sourced so the
-# memo renders without running that script.
-CENSUS_BOAT_FLOOR <- 20
-
 read_if <- function(f) {
   p <- file.path(OUT_DIR, f)
   if (file.exists(p)) readr::read_csv(p, show_col_types = FALSE) else NULL
@@ -113,6 +108,28 @@ reach_rows <- function(fit, fn, wb, tag) {
               `River mile` = paste0(signif(lower_rm, 3), "-", signif(upper_rm, 3)))
 }
 
+# A fallback of tibble(fit = character()) joins cleanly but carries none of
+# the columns the chunks then reference, so a missing outputs file failed with
+# "object 'n_paired_anchors' not found" instead of rendering em dashes -- the
+# exact case the fallback exists to cover. These carry the columns, empty.
+empty_like <- function(key, num_cols) {
+  out <- tibble::tibble(.rows = 0)
+  out[[key]] <- character()
+  for (n in num_cols) out[[n]] <- numeric()
+  out
+}
+
+effort_or_empty <- function() {
+  effort %||% empty_like("fit", c("n_index_sites", "n_index_days", "n_paired_anchors",
+                                  "census_anglers_bank", "census_anglers_boat"))
+}
+
+b_or_empty <- function() {
+  if (!is.null(b_all)) return(b_all)
+  empty_like("fishery_name", c("median", "q2.5", "q97.5", "prior_contraction")) |>
+    dplyr::mutate(bias_type = character(), informed_flag = character())
+}
+
 fmt <- function(x, d = 2) ifelse(is.na(x), "—", formatC(x, format = "f", digits = d))
 n_fmt <- function(x) ifelse(is.na(x), "—", formatC(x, format = "d", big.mark = ","))
 
@@ -170,9 +187,9 @@ if (nrow(reach_tbl) > 0) kable(reach_tbl)
 ```{r count-table}
 counts <- FITS |>
   left_join(
-    if (is.null(effort)) tibble(fit = character()) else
-      effort |> select(fit, n_index_sites, n_index_days, n_paired_anchors,
-                       census_anglers_bank, census_anglers_boat),
+    effort_or_empty() |>
+      select(fit, n_index_sites, n_index_days, n_paired_anchors,
+             census_anglers_bank, census_anglers_boat),
     by = c("scope_fit" = "fit")
   ) |>
   transmute(
@@ -188,59 +205,53 @@ kable(counts)
 ```
 
 ```{r b-table}
+# BOTH index types, one row each, rather than a vehicle-only table with the
+# trailer term suppressed underneath it. A wide interval is itself the finding
+# and reads more honestly than an absence, so the table reports the trailer
+# term and lets the interval carry the caveat.
+#
+# Long rather than wide: eight rows of five narrow columns, not four rows of
+# seven. Word wraps a numeric header one character per line when the table
+# runs past the text block.
 b_tbl <- FITS |>
+  tidyr::crossing(bias_type = c("vehicle", "trailer")) |>
   left_join(
-    if (is.null(b_all)) tibble(out_name = character()) else
-      b_all |> filter(bias_type == "vehicle") |>
-        select(out_name = fishery_name, median, q2.5, q97.5, informed_flag,
-               prior_contraction),
-    by = "out_name"
+    b_or_empty() |> select(out_name = fishery_name, bias_type, median, q2.5, q97.5,
+                           informed_flag, prior_contraction),
+    by = c("out_name", "bias_type")
   ) |>
   left_join(
-    if (is.null(effort)) tibble(fit = character()) else
-      effort |> select(fit, census_anglers_boat, n_paired_anchors),
+    effort_or_empty() |>
+      select(fit, census_anglers_bank, census_anglers_boat, n_paired_anchors),
     by = c("scope_fit" = "fit")
   ) |>
   mutate(
+    # The census anglers the index is measured against: the vehicle index sees
+    # the whole fishery, the trailer index only the boat component. Naming the
+    # relevant count is what makes a wide trailer interval interpretable.
+    census_n = if_else(bias_type == "trailer", census_anglers_boat,
+                       census_anglers_bank + census_anglers_boat),
     limitation = case_when(
       is.na(median)                      ~ "Not yet fitted",
       informed_flag == "unconverged"     ~ "Did not converge",
       informed_flag == "prior-dominated" ~ "Posterior tracks the prior",
       informed_flag == "weak"            ~ "Few angler interviews",
-      is.na(n_paired_anchors)            ~ "not yet summarised",
+      is.na(census_n)                    ~ "Counts not yet summarised",
+      bias_type == "trailer"             ~ paste0(census_n, " boat anglers in census"),
       TRUE                               ~ paste0(n_paired_anchors, " paired census days")
     )
   ) |>
+  arrange(match(fit, FITS$fit), desc(bias_type)) |>
   transmute(
     Fit = fit,
-    `Vehicle b` = fmt(median),
+    Index = if_else(bias_type == "vehicle", "Vehicle", "Trailer"),
+    b = fmt(median),
     `95 percent interval` = ifelse(is.na(median), "—",
                                    paste0(fmt(q2.5), "–", fmt(q97.5))),
-    `Data limitation` = limitation
+    `Basis` = limitation
   )
 
 kable(b_tbl)
-```
-
-```{r trailer-note, results = "asis"}
-if (!is.null(effort)) {
-  # Through FITS, so the prose names the fishery-years the same way the tables
-  # above do rather than falling back to the "MS 2024" scope tag.
-  thin <- FITS |>
-    inner_join(effort |> select(fit, census_anglers_boat),
-               by = c("scope_fit" = "fit")) |>
-    filter(census_anglers_boat < CENSUS_BOAT_FLOOR)
-  if (nrow(thin) > 0) {
-    cat(sprintf(
-      paste0("Trailer bias terms are not reported. Fewer than %d boat anglers were ",
-             "counted in census in each of these fishery-years (%s), and the trailer ",
-             "index is measured against boat anglers in census rather than against ",
-             "trailers counted.\n"),
-      CENSUS_BOAT_FLOOR,
-      paste(sprintf("%s: %d", thin$fit, as.integer(thin$census_anglers_boat)), collapse = "; ")
-    ))
-  }
-}
 ```
 
 ## Proposed approach for this season
