@@ -110,14 +110,10 @@ bias terms from prior years to inform the bias correction used in the current ye
 
 ## Proposed action
 
-We propose to generate bias terms for vehicle and trailer index counts from the fishery's
-own prior years. The distribution of a historical bias term should be wide enough to span variability observed in the past. 
-Following a review of b parameter estimates encompassing entire fishery seasons, we evaluated the same parameter
-on a subset of data for years 2024 and 2025 in the mainstem and North Fork Stillaguamish Rivers to achieve a comparable temporal and spatial footprint of
-the 2026 fishery. We propose using the mean and variance of the b parameters for vehicle and trailer counts and adjusting code and model
-structure as needed to accommodate this modification. This action requires an additional assumption that the index to census relationship
-is stable enough between the prior years and 2026 for a past b to be representative, and that a b parameter based on historical data 
-sufficiently captures the parameter's inter annual variability. 
+We propose to generate bias terms for vehicle and trailer index counts from the fishery’s own prior years. The distribution of a historical bias term should be wide enough to span variability observed in the past. Following a review of b parameter estimates encompassing entire fishery seasons, we evaluated the same parameter on a subset of data for years 2024 and 2025 in the mainstem and North Fork Stillaguamish Rivers to achieve a comparable temporal and spatial footprint of the 2026 fishery.
+
+The two most recent Stillaguamish seasons were compared on a common window, September 16th to October 31st, restricted to sections in the mainstem and North Fork Stillaguamish Rivers. The same reaches were surveyed in both years, from the same access sites and on the same number of paired census days (@tbl-survey).
+
 
 ```{r pending-note, results = "asis"}
 if (!have_fits) {
@@ -126,11 +122,6 @@ if (!have_fits) {
 }
 ```
 
-The two most recent Stillaguamish seasons were compared on a common
-window, September 16th to October 31st, restricted to sections in the
-mainstem and North Fork Stillaguamish Rivers. The same reaches were surveyed
-in both years, from the same access sites and on the same number of paired
-census days (@tbl-survey).
 
 
 ```{r}
@@ -238,13 +229,4 @@ if (nrow(fig_dat) > 0) {
 }
 ```
 
-## Proposed approach for this season
-
-For 2026 vehicle and trailer bias terms in the creel model, place a lognormal prior on b, centered on the pooled
-estimate from that fishery's own prior years and given a spread taken
-from the observed year-to-year variation in those same estimates. 
-
-
-If any census data is collected this season, the prior and the census data
-would combine, and the census will update whenever there is
-adequate data.
+For 2026 vehicle and trailer bias terms in the creel model, we propose placing a lognormal prior on b, using the mean and variance of the b parameters for vehicle and trailer counts from that fishery’s own prior years. Adjusting code and model structure may be needed to accommodate this modification. This action requires an additional assumption that the index to census relationship is stable enough between the prior years and 2026 for a past b to be representative, and that a b parameter based on historical data sufficiently captures the parameter’s inter annual variability. If any census data is collected this season, the prior and the census data would combine, and the census will update whenever there is adequate data. This work would proceed in collaboration with Stillaguamish and Snohomish Tribal technical staff, with all code and supporting documentation made available for all participants. 
