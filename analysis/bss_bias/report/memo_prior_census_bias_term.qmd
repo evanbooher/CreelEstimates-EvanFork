@@ -90,15 +90,14 @@ have_fits <- !is.null(b_all) &&
 ```
 
 Technical memo describing proposed modifications to effort
-bias-correction approach for Snohomish and Stillaguamish basin
+bias-correction approach for Stillaguamish basin
 freshwater fishery monitoring for 2026.
 
 Following the elimination of WDFW's District 13 freshwater salmon
-harvest monitoring budget, aerial census effort counts (also known as tie-in
-counts) are not funded for Stillaguamish mainstem salmon and
-North Fork Stillaguamish gamefish fisheries in 2026. These surveys are
-used to estimate a census-index bias parameter (b), which corrects for
-under or overcounts of anglers obtained during index counts of vehicles
+harvest monitoring budget, funding was reduced for sampling staff and data collection, including aerial census effort counts (also known as tie-in
+counts) for Stillaguamish mainstem salmon and
+North Fork Stillaguamish gamefish fisheries in 2026. 
+These surveys areused to estimate a census-index bias parameter (referred to as `b`), which corrects for under or overcounts of anglers obtained during index counts of vehicles
 and boat trailers at access sites. Measuring it requires census counts
 run alongside index counts on the same day, time, and river section.
 Without either in-season census counts or an informative prior on the
@@ -107,6 +106,7 @@ would be assumed to be an unbiased measure of fishing effort. Where
 census are reduced or eliminated this season, WDFW proposes to use
 historical data, where available and appropriate, for census-index effort
 bias terms from prior years to inform the bias correction used in the current year.
+
 
 ## Proposed action
 
@@ -235,4 +235,4 @@ if (nrow(fig_dat) > 0) {
 }
 ```
 
-For 2026 vehicle and trailer bias terms in the creel model, we propose placing a lognormal prior on b, using the mean and variance of the b parameters for vehicle and trailer counts from that fishery’s own prior years (@tbl-b, @fig-b). Adjusting code and model structure may be needed to accommodate this modification. This action requires an additional assumption that the index to census relationship is stable enough between the prior years and 2026 for a past b to be representative, and that a b parameter based on historical data sufficiently captures the parameter’s inter annual variability. If any census data is collected this season, the prior and the census data would combine, and the census will update whenever there is adequate data. This work would proceed in collaboration with Stillaguamish and Snohomish Tribal technical staff, with all code and supporting documentation made available for all participants. 
+For 2026 vehicle and trailer bias terms in the creel model, we propose placing a lognormal prior on b, using the mean and variance of the b parameters for vehicle and trailer counts from that fishery’s own prior years (@tbl-b, @fig-b). Adjusting code and model structure may be needed to accommodate this modification. This action requires an additional assumption that the index to census relationship is stable enough between the prior years and 2026 for a past b to be representative, and that a b parameter based on historical data sufficiently captures the parameter’s inter annual variability. If any census data is collected this season, the prior and the census data would combine, and the b parameter will update whenever there is adequate data. This work would occur in collaboration with Stillaguamish and Tulalip Tribal technical staff, with all code and supporting documentation made available for all participants. Regarding budget impacts to staffing, in 2026 fisheries we plan to sample at minimum three days per week (two weekdays, one weekend day) in open sections of river. 
