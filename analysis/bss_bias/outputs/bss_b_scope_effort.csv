@@ -1,0 +1,5 @@
+year,fit,scope,fishery_name,window_start,window_end,sections,n_index_sites,n_index_days,n_census_days,n_paired_anchors,anchor_dates,census_anglers_bank,census_anglers_boat,index_vehicles,index_trailers
+2024,MS 2024,MS,Stillaguamish salmon and gamefish 2024-25,2024-09-16,2024-10-31,"2, 3",12,24,3,3,"2024-09-25, 2024-10-05, 2024-10-22",145,0,2419,62
+2025,MS 2025,MS,Stillaguamish salmon and gamefish 2025-26,2025-09-16,2025-10-31,"1, 2",12,24,3,3,"2025-09-25, 2025-10-05, 2025-10-14",227,15,2530,49
+2024,NF 2024,NF,Stillaguamish salmon and gamefish 2024-25,2024-09-16,2024-10-31,4,3,25,3,3,"2024-09-25, 2024-10-05, 2024-10-22",7,2,184,5
+2025,NF 2025,NF,Stillaguamish salmon and gamefish 2025-26,2025-09-16,2025-10-31,3,3,28,3,3,"2025-09-25, 2025-10-05, 2025-10-14",12,0,207,7
