@@ -146,8 +146,9 @@ counts <- FITS |>
 kable(counts)
 ```
 
-Estimated bias terms for both index types are given in @tbl-b and shown in
-@fig-b.
+{{< pagebreak >}}
+
+Estimated bias terms for both index types are given in @tbl-b.
 
 ```{r}
 #| label: tbl-b
@@ -177,6 +178,11 @@ b_tbl <- FITS |>
 
 kable(b_tbl)
 ```
+
+@fig-b shows the same estimates on a log scale, where the width of an
+interval is comparable between terms of different size.
+
+&nbsp;
 
 ```{r}
 #| label: fig-b
@@ -229,4 +235,4 @@ if (nrow(fig_dat) > 0) {
 }
 ```
 
-For 2026 vehicle and trailer bias terms in the creel model, we propose placing a lognormal prior on b, using the mean and variance of the b parameters for vehicle and trailer counts from that fishery’s own prior years. Adjusting code and model structure may be needed to accommodate this modification. This action requires an additional assumption that the index to census relationship is stable enough between the prior years and 2026 for a past b to be representative, and that a b parameter based on historical data sufficiently captures the parameter’s inter annual variability. If any census data is collected this season, the prior and the census data would combine, and the census will update whenever there is adequate data. This work would proceed in collaboration with Stillaguamish and Snohomish Tribal technical staff, with all code and supporting documentation made available for all participants. 
+For 2026 vehicle and trailer bias terms in the creel model, we propose placing a lognormal prior on b, using the mean and variance of the b parameters for vehicle and trailer counts from that fishery’s own prior years (@tbl-b, @fig-b). Adjusting code and model structure may be needed to accommodate this modification. This action requires an additional assumption that the index to census relationship is stable enough between the prior years and 2026 for a past b to be representative, and that a b parameter based on historical data sufficiently captures the parameter’s inter annual variability. If any census data is collected this season, the prior and the census data would combine, and the census will update whenever there is adequate data. This work would proceed in collaboration with Stillaguamish and Snohomish Tribal technical staff, with all code and supporting documentation made available for all participants. 
