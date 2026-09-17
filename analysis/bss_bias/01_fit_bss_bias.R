@@ -486,31 +486,81 @@ tagged_path <- function(path) {
 # (fishery_name, est_cg); keyed on fishery_name only, the Coho pass silently
 # DELETED every Chinook row as it went, so the file could never hold both
 # groups at once.
+#
+# A LOCKED FILE MUST NOT COST A FIT. Excel takes an exclusive lock on an open
+# .csv, so write_csv() aborts with "Cannot open file for writing". That threw
+# out of fit_one_fishery() with the sampling already finished and nothing
+# saved -- a whole prod_hard run gone because a spreadsheet was open. A write
+# that cannot land now goes to a sidecar instead of throwing, and the next
+# successful append absorbs the sidecars. Close Excel, run anything, and the
+# file heals itself.
+sidecar_paths <- function(path) {
+  stem <- sub("\\.csv$", "", basename(path))
+  list.files(dirname(path),
+             pattern = paste0("^", stem, "__locked_[0-9]{8}_[0-9]{6}\\.csv$"),
+             full.names = TRUE)
+}
+
 append_csv_row <- function(row_df, path, key_cols = "fishery_name") {
   path <- tagged_path(path)
   key_cols <- intersect(key_cols, names(row_df))
-  if (file.exists(path)) {
-    # Force the re-read to use row_df's ACTUAL column types rather than
-    # read_csv()'s own guess from the file's text. Columns built via
-    # paste(..., collapse = "|") (crc_areas, section_nums, ...) are always
-    # character in row_df, but read back as <double> if every row written so
-    # far happened to be a single numeric-looking value with no "|" -- the
-    # guess depends on what's already on disk, not on the column's real type,
-    # and bind_rows() then errors on the mismatch the moment a row needs the
-    # character form. Unlisted columns (schema drift) still fall back to
-    # col_guess() via cols()'s default.
-    col_types <- do.call(readr::cols, imap(row_df, ~ if (inherits(.x, "Date")) readr::col_date()
-      else if (is.character(.x)) readr::col_character()
-      else if (is.logical(.x)) readr::col_logical()
-      else readr::col_double()))
+
+  # Force every re-read to use row_df's ACTUAL column types rather than
+  # read_csv()'s own guess from the file's text. Columns built via
+  # paste(..., collapse = "|") (crc_areas, section_nums, ...) are always
+  # character in row_df, but read back as <double> if every row written so
+  # far happened to be a single numeric-looking value with no "|" -- the
+  # guess depends on what's already on disk, not on the column's real type,
+  # and bind_rows() then errors on the mismatch the moment a row needs the
+  # character form. Unlisted columns (schema drift) still fall back to
+  # col_guess() via cols()'s default.
+  col_types <- do.call(readr::cols, imap(row_df, ~ if (inherits(.x, "Date")) readr::col_date()
+    else if (is.character(.x)) readr::col_character()
+    else if (is.logical(.x)) readr::col_logical()
+    else readr::col_double()))
+
+  # Rows from earlier writes that could not land, oldest first so the newest
+  # attempt at a given key is the one kept.
+  pending <- sort(sidecar_paths(path))
+  if (length(pending) > 0) {
+    row_df <- dplyr::bind_rows(c(
+      lapply(pending, readr::read_csv, col_types = col_types), list(row_df)
+    ))
+    if (length(key_cols) > 0) {
+      row_df <- row_df |>
+        dplyr::group_by(dplyr::across(dplyr::all_of(key_cols))) |>
+        dplyr::slice_tail(n = 1) |>
+        dplyr::ungroup()
+    }
+  }
+
+  out <- if (file.exists(path)) {
     existing <- readr::read_csv(path, col_types = col_types)
-    if (all(key_cols %in% names(existing))) {
+    if (length(key_cols) > 0 && all(key_cols %in% names(existing))) {
       existing <- dplyr::anti_join(existing, dplyr::distinct(row_df[key_cols]), by = key_cols)
     }
-    readr::write_csv(dplyr::bind_rows(existing, row_df), path)
-  } else {
-    readr::write_csv(row_df, path)
+    dplyr::bind_rows(existing, row_df)
+  } else row_df
+
+  landed <- tryCatch({ readr::write_csv(out, path); TRUE }, error = function(e) FALSE)
+  if (landed) {
+    if (length(pending) > 0) {
+      unlink(pending)
+      cli::cli_alert_info("  Merged {length(pending)} pending row set{?s} into {.file {basename(path)}}.")
+    }
+    return(invisible(path))
   }
+
+  side <- sub("\\.csv$", paste0("__locked_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv"), path)
+  readr::write_csv(row_df, side)
+  # Only now that `side` holds them: the older sidecars are subsumed by it, and
+  # if the line above had thrown they would still be on disk.
+  unlink(pending)
+  cli::cli_alert_danger(
+    "  {.file {basename(path)}} is locked -- open in Excel? Rows went to \\
+     {.file {basename(side)}} instead. Close the file; the next append merges them back."
+  )
+  invisible(side)
 }
 
 # ------------------------------------------------------------------------------
@@ -1154,12 +1204,16 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
     return(list(status = "ok", bias_summary = bias_summary, runtime_sec = runtime_sec))
   }
 
-  append_csv_row(bias_summary, file.path(OUT_DIR, "bss_b_summary.csv"))
-
+  # DRAWS FIRST, summary second. The draws are the expensive artifact -- hours
+  # of sampling -- and the summary is derivable from them. Appending the CSV
+  # first meant a locked bss_b_summary.csv threw with the draws still only in
+  # memory, and the run was unrecoverable.
   draws <- posterior::as_draws_df(bss_fit) |> posterior::subset_draws(variable = "b")
   saveRDS(draws, file.path(DRAWS_DIR, paste0(safe_name(out_name), ".rds")))
 
   if (SAVE_FITS) saveRDS(bss_fit, file.path(FITS_DIR, paste0(safe_name(out_name), ".rds")))
+
+  append_csv_row(bias_summary, file.path(OUT_DIR, "bss_b_summary.csv"))
 
   list(status = "ok", bias_summary = bias_summary, runtime_sec = runtime_sec)
 }
