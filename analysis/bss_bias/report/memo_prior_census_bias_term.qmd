@@ -176,9 +176,11 @@ if (!have_fits) {
 
 The two most recent Stillaguamish seasons were compared on a common
 window, September 16th to October 31st, restricted to sections in the
-mainstem and North Fork Stillaguamish Rivers. The same reaches were surveyed in both years. 
+mainstem and North Fork Stillaguamish Rivers. The same reaches were surveyed
+in both years, from the same access sites and on the same number of paired
+census days (@tbl-survey).
 
-```{r, eval = FALSE, reach-table}
+```{r reach-table, eval = FALSE}
 # TWO NARROW TABLES, not one wide one. A single table carrying the reach names
 # alongside six count columns forced Word to wrap every numeric header one
 # character per line.
@@ -188,7 +190,9 @@ reach_tbl <- bind_rows(pmap(
 if (nrow(reach_tbl) > 0) kable(reach_tbl)
 ```
 
-```{r count-table}
+```{r}
+#| label: tbl-survey
+#| tbl-cap: "Survey effort behind each bias term, on the common September 16 to October 31 window."
 counts <- FITS |>
   left_join(
     effort_or_empty() |>
@@ -208,7 +212,12 @@ counts <- FITS |>
 kable(counts)
 ```
 
-```{r b-table}
+Estimated bias terms for both index types are given in @tbl-b and shown in
+@fig-b.
+
+```{r}
+#| label: tbl-b
+#| tbl-cap: "Estimated census-index bias terms with 95 percent credible intervals."
 # BOTH index types, one row each, rather than a vehicle-only table with the
 # trailer term suppressed underneath it. A wide interval is itself the finding
 # and reads more honestly than an absence, so the table reports the trailer
@@ -258,6 +267,44 @@ b_tbl <- FITS |>
 kable(b_tbl)
 ```
 
+```{r}
+#| label: fig-b
+#| fig-cap: "Bias term estimates and 95 percent credible intervals. The dashed line marks b = 1, where index counts are an unbiased measure of effort."
+#| fig-width: 6.5
+#| fig-height: 2.8
+# Built here from bss_b_summary.csv rather than read as an image, so the figure
+# refreshes with the fits and the memo stays self-contained.
+#
+# Log x: b is multiplicative -- catch scales as 1/b -- so a factor-of-two
+# difference should look the same whether it sits at 0.5 or at 4. On a linear
+# axis the trailer intervals would flatten the vehicle ones to nothing.
+fig_dat <- FITS |>
+  tidyr::crossing(bias_type = c("vehicle", "trailer")) |>
+  left_join(
+    b_or_empty() |> select(out_name = fishery_name, bias_type, median, q2.5, q97.5),
+    by = c("out_name", "bias_type")
+  ) |>
+  filter(!is.na(median)) |>
+  mutate(
+    Index = factor(if_else(bias_type == "vehicle", "Vehicle", "Trailer"),
+                   levels = c("Vehicle", "Trailer")),
+    fit   = factor(fit, levels = rev(FITS$fit))
+  )
+
+if (nrow(fig_dat) > 0) {
+  ggplot(fig_dat, aes(x = median, y = fit)) +
+    geom_vline(xintercept = 1, linetype = "dashed", colour = "grey40") +
+    geom_errorbarh(aes(xmin = q2.5, xmax = q97.5), height = 0.18) +
+    geom_point(size = 2) +
+    facet_wrap(~Index) +
+    scale_x_log10() +
+    labs(x = "Bias term b", y = NULL) +
+    theme_bw(base_size = 10) +
+    theme(panel.grid.minor = element_blank(),
+          strip.background = element_rect(fill = "white", colour = "black"))
+}
+```
+
 ## Proposed approach for this season
 
 For 2026 vehicle and trailer bias terms in the creel model, place a lognormal prior on b, centered on the pooled
@@ -268,9 +315,8 @@ from the observed year-to-year variation in those same estimates.
 ms <- FITS |>
   filter(scope == "MS") |>
   left_join(
-    if (is.null(b_all)) tibble(out_name = character()) else
-      b_all |> filter(bias_type == "vehicle") |>
-        select(out_name = fishery_name, median, q2.5, q97.5, informed_flag),
+    b_or_empty() |> filter(bias_type == "vehicle") |>
+      select(out_name = fishery_name, median, q2.5, q97.5, informed_flag),
     by = "out_name"
   ) |>
   filter(!is.na(median), informed_flag != "unconverged")
@@ -287,7 +333,7 @@ if (nrow(ms) == 2) {
     fmt(hi$median), str_extract(hi$fit, "\\d{4}"),
     fmt(lo$median), str_extract(lo$fit, "\\d{4}"),
     if (is.null(effort)) "same" else
-      n_fmt(effort$n_index_sites[match(hi$fit, effort$fit)]),
+      n_fmt(effort$n_index_sites[match(hi$scope_fit, effort$fit)]),
     fmt(hi$q2.5), fmt(hi$q97.5), fmt(lo$q2.5), fmt(lo$q97.5),
     str_extract(hi$fit, "\\d{4}"), str_extract(lo$fit, "\\d{4}"),
     100 * (1 - lo$median / hi$median)
