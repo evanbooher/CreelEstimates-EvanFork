@@ -131,9 +131,16 @@ stan_list <- list(
   w = days$day_type_num, # int vec; 0/1 denoting Weekday/end for model offset
   L = days$day_length,  # num vec, daylength (model offset; assumption)
   # num mat; open/closed by section; 0 defined as 1E-6 for model
-  O = days |> # only generates closure columns for sections with at least one observation from effort census counts
+  #
+  # THIRD occurrence of the same bug already fixed for S and p_TI: selected
+  # columns from effort_census$section_num, which is not a reliable "which
+  # sections exist" source in a census-sparse year -- empty or mismatched
+  # against the aligned section set, this selects ZERO columns, giving O
+  # dims (D,0) against a declared (D,S), which is exactly what crashed here.
+  # census_expan is the same reliably-present source S and p_TI now use.
+  O = days |>
     select(contains("section_")) |>
-    select(any_of(paste0("open_section_", unique(dwg_summarized$effort_census$section_num)))) |>
+    select(any_of(paste0("open_section_", unique(dwg_summarized$census_expan$section_num)))) |>
     mutate(across(everything(), ~if_else(., 1, 0.000001))) |> 
     as.matrix(),
     

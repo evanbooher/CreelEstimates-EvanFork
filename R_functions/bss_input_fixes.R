@@ -104,34 +104,38 @@ recode_angler_final_int <- function(d, table_name) {
 # ------------------------------------------------------------------------------
 # Section alignment
 # ------------------------------------------------------------------------------
-# prep_inputs_bss() sizes the Stan arrays from the CENSUS sections --
-#   S      = length(unique(effort_census$section_num))
-#   O cols = any_of(paste0("open_section_", unique(effort_census$section_num)))
+# prep_inputs_bss() sizes the Stan arrays from census_expan --
+#   S      = length(unique(census_expan$section_num))
+#   O cols = any_of(paste0("open_section_", unique(census_expan$section_num)))
 #   p_TI   = pivot_wider(census_expan, names_from = section_num)
 # -- but indexes them with the RAW section_num carried on every observation row
-# (section_V, section_T, section_E, section_IntC, ...). Three conditions must
-# therefore hold, and nothing in the pipeline enforces any of them:
+# (section_V, section_T, section_E, section_IntC, ...). ALL THREE now come from
+# the same table (S and O were sourced from effort_census until 2026-09-22 --
+# empty or mismatched in a census-sparse year, which is what "Section index 1
+# exceeds S = 0" and the O dimension-mismatch error both were), so they can no
+# longer disagree with EACH OTHER, but two conditions still have to hold
+# against census_expan itself, and nothing in the pipeline enforces either:
 #
-#   1. every observed section is also a census section, or the index exceeds S;
-#   2. the census sections are exactly 1..S with no gaps -- Stillaguamish is
-#      1-6 and 8;
-#   3. census_expan covers the same sections as effort_census, in the same
-#      order, or p_TI's columns are misaligned with the section they price.
+#   1. every observed section is also present in census_expan, or the index
+#      exceeds S;
+#   2. census_expan's sections are exactly 1..S with no gaps -- Stillaguamish
+#      is 1-6 and 8.
 #
 # A water-body restriction can leave the surviving numbers with gaps too --
 # Stillaguamish 2024-25 starts at section 2, and dropping the South Fork leaves
-# 2-6 -- and it does nothing at all when the census counts themselves skip a
-# section, or when census_expan (built from location_type == "Site" rows)
-# covers a different set than effort_census. Those are this function's job, not
-# the restriction's.
+# 2-6 -- and it does nothing at all when census_expan (built from
+# location_type == "Site" rows, so present even in a fishery-year with zero
+# actual census events) itself skips a section that effort_index or interview
+# data has. That's this function's job, not the restriction's.
 #
-# align_bss_sections() enforces all three: it keeps the sections that have BOTH
-# census effort counts and a p_census entry, drops the rest, and renumbers what
-# is left to a dense 1..S. It is an IDENTITY TRANSFORM whenever the three
-# conditions already hold -- which is every fishery-year that fits today, since
-# they fit precisely because they hold. It also sorts effort_census by section,
-# so unique() hands O's columns back in the same ascending order that
-# census_expan's arrange() gives p_TI's.
+# align_bss_sections() enforces both: it keeps the sections that have usable
+# effort counts (census sections when they exist, index sections when they
+# don't -- see the census-free branch below) AND a p_census entry, drops the
+# rest, and renumbers what is left to a dense 1..S. It is an IDENTITY
+# TRANSFORM whenever the conditions already hold -- which is every
+# fishery-year that fits today, since they fit precisely because they hold.
+# It also sorts effort_census by section, so unique() hands O's columns back
+# in the same ascending order that census_expan's arrange() gives p_TI's.
 #
 # Renumbering is internal to the model inputs. `b` is one scalar per index count
 # type, so it does not depend on a section's label; the mapping is written to
