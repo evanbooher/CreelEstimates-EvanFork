@@ -140,12 +140,39 @@ align_bss_sections <- function(dwg_summ, days, fishery_name) {
   secs_of <- function(d) sort(unique(as.double(na.omit(d$section_num))))
   census_secs <- secs_of(dwg_summ$effort_census)
   expan_secs  <- secs_of(dwg_summ$census_expan)
-  usable <- intersect(census_secs, expan_secs)
+  index_secs  <- secs_of(dwg_summ$effort_index)
+
+  # CENSUS-FREE YEAR (2026-09-22): census_secs is legitimately empty when no
+  # tie-in counts were collected at all -- not a data defect. p_census/p_TI is
+  # NOT gated on a live census event: prep_dwg_census_expan() builds it from
+  # dwg$effort at large (index rows included), with p_census_bank/p_census_boat
+  # joined from the static fishery_manager table and defaulting to 1 (full
+  # coverage) where unset -- see fw_creel.Rmd's own comment, "so this data can
+  # be used in situations where census counts have not ocurred yet". V_I/T_I's
+  # likelihood still needs p_TI by section regardless of whether census data
+  # exists, so the right intersection here is against whichever sections
+  # actually have data THIS year -- index sections when there is no census,
+  # census sections otherwise, unchanged from before.
+  if (length(census_secs) == 0) {
+    cli::cli_alert_warning(
+      "  Section alignment: no census effort counts this fishery-year -- \
+       aligning to index sections against the p_census lookup instead of \
+       census sections. p_census still applies (default 1 where unset); this \
+       is not skipping the census-index bias correction, just its section \
+       reconciliation step, which has nothing to reconcile against with zero \
+       census events."
+    )
+    primary_secs <- index_secs
+  } else {
+    primary_secs <- census_secs
+  }
+  usable <- intersect(primary_secs, expan_secs)
 
   if (length(usable) == 0) {
     bss_fix_fail(
-      paste0("No section has both census effort counts and a p_census entry. ",
+      paste0("No section has both usable effort counts and a p_census entry. ",
              "Census sections: ", paste(census_secs, collapse = ", "),
+             "; index sections: ", paste(index_secs, collapse = ", "),
              "; census_expan sections: ", paste(expan_secs, collapse = ", "), "."),
       stage = "align_sections"
     )
@@ -158,17 +185,19 @@ align_bss_sections <- function(dwg_summ, days, fishery_name) {
     bss_fix_fail(
       paste0("`days` has no open/closed column for section(s) ",
              paste(sub("^open_section_", "", missing_open), collapse = ", "),
-             ", which carry census counts. prep_days() was given sections: ",
-             paste(sort(unique(na.omit(c(census_secs, expan_secs)))), collapse = ", "), "."),
+             ", which carry ", if (length(census_secs) == 0) "index" else "census",
+             " counts. prep_days() was given sections: ",
+             paste(sort(unique(na.omit(c(primary_secs, expan_secs)))), collapse = ", "), "."),
       stage = "align_sections"
     )
   }
 
-  dropped <- setdiff(union(census_secs, expan_secs), usable)
+  dropped <- setdiff(union(primary_secs, expan_secs), usable)
   if (length(dropped) > 0) {
     cli::cli_alert_warning(
-      "  Section alignment: dropping {.val {dropped}} -- present in the census counts \\
-       or the p_census lookup, but not both."
+      "  Section alignment: dropping {.val {dropped}} -- present in the \\
+       {if (length(census_secs) == 0) 'index counts' else 'census counts'} or \\
+       the p_census lookup, but not both."
     )
   }
   if (!identical(usable, as.double(seq_along(usable)))) {
