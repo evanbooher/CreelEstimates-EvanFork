@@ -50,6 +50,15 @@ params:
   value_lognormal_mu_b_trailer: 0
   value_lognormal_sigma_b_vehicle: 1
   value_lognormal_sigma_b_trailer: 1
+  # Sampler tuning. Defaults match what run_fit() had hardcoded before this
+  # param existed (1000/500/0.7/12) -- inherited from fw_creel.Rmd's own
+  # default, not tuned for this model or this fishery-year's sparse data.
+  # Override at render time, e.g. for a heavier re-run:
+  #   n_iter = 4000, n_warmup = 2500, adapt_delta = 0.99, max_treedepth = 14
+  n_iter: 1000
+  n_warmup: 500
+  adapt_delta: 0.7
+  max_treedepth: 12
 output:
   html_document:
     toc: true
@@ -1180,11 +1189,11 @@ run_fit <- function(chains, cores) fit_bss(
   bss_inputs_list = inputs_bss[[ecg]],
   n_chain = chains,
   n_cores = cores,
-  n_iter = 1000,
-  n_warmup = 500,
+  n_iter = params$n_iter,
+  n_warmup = params$n_warmup,
   n_thin = 1,
-  adapt_delta = 0.7,
-  max_treedepth = 12,
+  adapt_delta = params$adapt_delta,
+  max_treedepth = params$max_treedepth,
   init = "0"
 )
 
@@ -1318,13 +1327,21 @@ for(ecg in names(inputs_bss)) {
   draws_df_full <- posterior::as_draws_df(draws_array_temp)
   
   ## subset parameters
+  # r_E, Lcorr_E, Lcorr_C REMOVED (2026-09-22): this fork's model
+  # (BSS_creel_model_02_2026-09-22_univariate_bprior.stan) declares neither.
+  # It has no cross-section/cross-gear correlation structure at all (that's
+  # the "univariate" in its name -- no Lcorr_E/Lcorr_C, unlike the production
+  # model), and it computes 1/square(sigma_r_E) inline in the model block
+  # rather than saving it as a named transformed parameter the way r_C is.
+  # Copied verbatim from fw_creel.Rmd when this fork was created and never
+  # updated against the new model's actual parameter set -- that mismatch is
+  # what "variables missing in the draws object: r_E, Lcorr_E, Lcorr_C" was.
   params_keep <- c(
     "mu_E", "mu_C",
     "lambda_E_S", "lambda_C_S",
     "omega_E", "omega_C",
-    "r_E", "r_C",
+    "r_C",
     "sigma_eps_E", "sigma_eps_C",
-    "Lcorr_E", "Lcorr_C",
     "phi_E_scaled", "phi_C_scaled",
     "sigma_r_E", "sigma_r_C",
     "p_I",
@@ -1415,11 +1432,13 @@ for(ecg in names(inputs_bss)) {
   }
 
   # trace plots
+  # r_E removed -- same reason as params_keep above: not declared in this
+  # fork's model.
   trace_pars <- c(
     "C_sum", "E_sum", "phi_C_scaled", "phi_E_scaled",
     "sigma_r_C", "sigma_r_E", "sigma_eps_C", "sigma_eps_E",
     "sigma_mu_C", "sigma_mu_E", "phi_C", "phi_E",
-    "r_C", "r_E", "B1", "lp__"
+    "r_C", "B1", "lp__"
   )
 
   build_trace_plot <- function(pars) {
