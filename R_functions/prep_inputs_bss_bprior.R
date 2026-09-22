@@ -176,12 +176,37 @@ stan_list <- list(
   E_s = effort_census_anglers$count_census, # num vec; observed # of anglers
   
   #proportion spatial coverage during census (tie-in; TI) counts  
-  p_TI = 
-    census_expan |> 
-    select(angler_final, section_num, p_census) |> 
-    pivot_wider(names_from = section_num, values_from = p_census) |> 
-    select(-angler_final) |> 
-    as.matrix(),
+  # p_TI's ROW COUNT must equal G exactly -- Stan declares matrix[G,S] p_TI,
+  # and census_expan ALWAYS carries both "bank" and "boat" rows regardless of
+  # this fishery-year's actual gear-type composition (prep_dwg_census_expan()
+  # builds it from the static per-section p_census lookup, not from which
+  # gear types were actually interviewed). A bank-only fishery-year (G=1) fed
+  # the unfiltered 2-row census_expan would hand Stan a matrix[2,S] against a
+  # declared matrix[1,S] -- a guaranteed dimension mismatch, not a maybe.
+  # Filtered here to the gear types actually present in THIS fishery-year's
+  # interviews, bank(1) before boat(2), matching angler_final_int's own
+  # convention -- so p_TI's row count tracks G by construction, generally,
+  # not just for the bank-only case this fork was built for.
+  p_TI = {
+    gear_labels <- c("1" = "bank", "2" = "boat")
+    needed <- gear_labels[as.character(sort(unique(interview_cg$angler_final_int)))]
+    out <- census_expan |>
+      filter(angler_final %in% needed) |>
+      mutate(angler_final = factor(angler_final, levels = needed)) |>
+      arrange(angler_final) |>
+      select(angler_final, section_num, p_census) |>
+      pivot_wider(names_from = section_num, values_from = p_census) |>
+      select(-angler_final) |>
+      as.matrix()
+    if (nrow(out) != length(needed)) {
+      stop("p_TI has ", nrow(out), " row(s) but this fishery-year's interviews ",
+           "need ", length(needed), " (", paste(needed, collapse = ", "), "). ",
+           "census_expan is missing a p_census entry for a gear type this ",
+           "fishery-year's interviews actually have -- check prep_dwg_census_expan() ",
+           "and the fishery_manager p_census_bank/p_census_boat lookup.", call. = FALSE)
+    }
+    out
+  },
     
   # interview data - CPUE 
   IntC = nrow(distinct(interview_cg, interview_id)),  # int; total number of angler interviews with c & h data; distinct() here should be redundant

@@ -285,22 +285,44 @@ apply_bss_input_fixes <- function(dwg_summ, days, fishery_name) {
 # the sampler, with nothing naming the fishery or the cause.
 # ------------------------------------------------------------------------------
 
-preflight_bss_inputs <- function(inputs_bss, fishery_name) {
-  # G < 2 (2026-09-22): p_TI/R_V/R_T/lambda are always built for BOTH gear
-  # types (census_expan unconditionally carries bank and boat), but G here is
-  # computed from THIS catch group's own interviews -- filter to a narrow
-  # enough species/life_stage/fin_mark/fate slice and the interviews that
-  # remain can easily be single-gear, especially on a small interview total.
-  # Without this check that surfaces later as a p_TI shape mismatch (2 rows
-  # vs G x S), true but unhelpful for finding the actual cause. Same check
-  # 01_fit_bss_bias.R already makes at its own bss_preflight stage.
-  if (inputs_bss$G < 2) {
+preflight_bss_inputs <- function(inputs_bss, fishery_name, allow_single_gear = FALSE) {
+  # G < 2: p_TI/R_V/R_T/lambda are built for BOTH gear types in the model
+  # every basin normally fits (b[2]/lambda[...,2] indexed directly), so G=1
+  # is a hard structural failure there -- same check 01_fit_bss_bias.R makes
+  # at its own bss_preflight stage. NOT a fixed rule, though: the 2026-09-22
+  # bank-only fork (BSS_creel_model_02_2026-09-22_ppc.stan, run through
+  # fw_creel_bprior_2026.Rmd) was built specifically to take G=1 -- b there is
+  # fixed-size-2 and explicitly priored regardless of G, and p_TI is built to
+  # match G exactly (see the p_TI check below and prep_inputs_bss_bprior.R).
+  # allow_single_gear lets that Rmd's call site say so; every other caller
+  # keeps the strict default.
+  if (!allow_single_gear && inputs_bss$G < 2) {
     bss_fix_fail(
       paste0("Only one angler type (G = ", inputs_bss$G, "); b[2]/lambda[...,2] ",
              "out of bounds in the BSS likelihood, and p_TI (always 2 rows, bank ",
              "and boat) will not match G x S. Likely a catch group filtered too ",
              "narrow for this fishery's interview count -- a pooled group (e.g. ",
-             "catch_groups_df('chinook_all')) keeps both gear types represented."),
+             "catch_groups_df('chinook_all')) keeps both gear types represented. ",
+             "If this fishery-year is genuinely single-gear (e.g. zero boat ",
+             "anglers all season), that needs a model built for it, not a wider ",
+             "catch group -- see stan_models/BSS_creel_model_02_2026-09-22_ppc.stan."),
+      stage = "bss_preflight"
+    )
+  }
+
+  # p_TI's row count must equal G, for any model: Stan declares matrix[G,S]
+  # p_TI, and census_expan (built from the static per-section p_census lookup,
+  # not from which gear types were actually interviewed) can carry more or
+  # fewer angler_final rows than this fishery-year's interviews actually have
+  # gear types for. Unconditional -- unlike G < 2 above, a row-count mismatch
+  # is never valid for ANY model, single-gear-aware or not.
+  if (!is.null(inputs_bss$p_TI) && nrow(inputs_bss$p_TI) != inputs_bss$G) {
+    bss_fix_fail(
+      paste0("p_TI has ", nrow(inputs_bss$p_TI), " row(s) but G = ", inputs_bss$G,
+             ". census_expan's angler_final rows do not match this fishery-year's ",
+             "actual gear-type composition -- check prep_inputs_bss()'s (or its ",
+             "fork's) p_TI construction and the fishery_manager p_census_bank/",
+             "p_census_boat lookup."),
       stage = "bss_preflight"
     )
   }
