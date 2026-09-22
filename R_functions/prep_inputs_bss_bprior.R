@@ -101,7 +101,18 @@ stan_list <- list(
   est_cg = est_catch_group,
   D = nrow(days), # int; number of fishing days
   G = length(unique(interview_cg$angler_final_int)),  # int; final number of unique gear/angler types 
-  S = as.integer(length(unique(dwg_summarized$effort_census$section_num))),  # int; final number of river sections  
+  # CENSUS-FREE YEAR (2026-09-22): S sourced from census_expan, not
+  # effort_census. effort_census is legitimately empty when no tie-in counts
+  # were collected this year, which made S = 0 while section_V/section_T
+  # (from effort_index) still held real section indices -- caught by
+  # preflight_bss_inputs() as "Section index 1 exceeds S = 0", which is what it
+  # is for. census_expan (p_census/p_TI) is not gated on a live census event --
+  # prep_dwg_census_expan() builds it from dwg$effort at large, defaulting to
+  # full coverage where unset -- and after align_bss_sections() runs, it always
+  # has exactly one row per (angler_final, section) for every section in the
+  # aligned set. Same table p_TI pivots its columns from below, so S and p_TI's
+  # column count now agree by construction rather than by coincidence.
+  S = as.integer(length(unique(dwg_summarized$census_expan$section_num))),  # int; final number of river sections  
   H = max(dwg_summarized$effort_index$count_sequence), # int; max number of index counts within a sample day
   
   P_n = case_when( #int; total number of periods
