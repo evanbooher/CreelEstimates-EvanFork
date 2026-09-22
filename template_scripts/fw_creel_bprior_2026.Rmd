@@ -13,13 +13,13 @@
 title: "Freshwater Creel Report <br>`r params$fishery_name`"
 date: "`r Sys.Date()`"
 params:
-  project_name: "District 14"
-  fishery_name: "Skagit spring Chinook 2026 upper"
-  est_date_start: ""
-  est_date_end: ""
+  project_name: "District 13"
+  fishery_name: "Stillaguamish salmon and gamefish 2026"
+  est_date_start: "2026-08-29"
+  est_date_end: "2026-09-17"
   est_catch_groups: !r data.frame(rbind(
-    c(species = 'Chinook', life_stage = 'Adult', fin_mark = 'UM', fate = 'Released'),
-    c(species = 'Chinook', life_stage = 'Adult', fin_mark = 'AD', fate = 'Kept')))
+    c(species = 'Chinook', life_stage = 'Jack', fin_mark = 'UNK', fate = 'Released'),
+    c(species = 'Coastal Cutthroat', life_stage = 'NA', fin_mark = 'NA|UM|UNK', fate = 'Released')))
   study_design: "Standard"   
   boat_type_collapse: "Yes"
   fish_location_determines_type: "No"
