@@ -62,8 +62,12 @@ drop_na_bss_inputs <- function(inputs_bss, fishery_name = NA_character_) {
 
   day_level <- intersect(c("w", "period", "L"), names(inputs_bss))
   bad_day <- day_level[vapply(day_level, function(v) any(is.na(inputs_bss[[v]])), logical(1))]
+  # bss_fix_fail() (R_functions/bss_input_fixes.R), not skip_fishery()
+  # directly -- see that file's 2026-09-22 note. This call was unguarded and
+  # would crash with "could not find function" when rendering fw_creel.Rmd
+  # on its own, on the one fishery-year this branch actually fires for.
   if (length(bad_day) > 0 || (!is.null(inputs_bss$O) && any(is.na(inputs_bss$O)))) {
-    skip_fishery(
+    bss_fix_fail(
       paste0("NA found in day-indexed/status input(s) (",
              paste(c(bad_day, if (any(is.na(inputs_bss$O))) "O"), collapse = ", "),
              ") -- these are referenced by position from every count/interview group and ",

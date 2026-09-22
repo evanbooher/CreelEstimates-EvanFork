@@ -36,6 +36,15 @@ bss_fix_fail <- function(msg, stage = "bss_input_fixes") {
   }
 }
 
+# BUG FIXED 2026-09-22: align_bss_sections() (below) called skip_fishery()
+# directly in two places instead of through bss_fix_fail() above -- bypassing
+# the fallback this file exists to provide. Every fishery-year fit until now
+# had well-formed sections, so the branch was never exercised; rendering
+# fw_creel.Rmd standalone (no 01_fit_bss_bias.R sourced first, so
+# skip_fishery() is undefined) turned a real, reportable data problem into
+# "could not find function" instead of the intended stop() with the actual
+# message. Same fix applied to drop_na_bss_inputs.R's one direct call.
+
 # ------------------------------------------------------------------------------
 # Angler-type coding
 # ------------------------------------------------------------------------------
@@ -134,7 +143,7 @@ align_bss_sections <- function(dwg_summ, days, fishery_name) {
   usable <- intersect(census_secs, expan_secs)
 
   if (length(usable) == 0) {
-    skip_fishery(
+    bss_fix_fail(
       paste0("No section has both census effort counts and a p_census entry. ",
              "Census sections: ", paste(census_secs, collapse = ", "),
              "; census_expan sections: ", paste(expan_secs, collapse = ", "), "."),
@@ -146,7 +155,7 @@ align_bss_sections <- function(dwg_summ, days, fishery_name) {
   want_open <- paste0("open_section_", as.character(usable))
   missing_open <- setdiff(want_open, open_cols)
   if (length(missing_open) > 0) {
-    skip_fishery(
+    bss_fix_fail(
       paste0("`days` has no open/closed column for section(s) ",
              paste(sub("^open_section_", "", missing_open), collapse = ", "),
              ", which carry census counts. prep_days() was given sections: ",
