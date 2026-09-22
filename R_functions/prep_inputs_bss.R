@@ -183,20 +183,7 @@ stan_list <- list(
   
   value_normal_sigma_omega_C_0 = priors["value_normal_sigma_omega_C_0"], #the SD hyperparameter in the prior distribution omega_C_0; normal sd (log-space); default = 1   
   value_normal_sigma_omega_E_0 = priors["value_normal_sigma_omega_E_0"], #the SD hyperparameter in the prior distribution omega_E_0; normal sd (log-space);; default = 3  
-  # b's prior, PER CHANNEL: b[1] is the vehicle index, b[2] the trailer index
-  # (see get_bss_bias.R -- positional, not angler-type-indexed). Was a single
-  # value_lognormal_sigma_b shared by both with mu fixed at 0; vectorised so a
-  # census-free fishery-year can carry a history-informed vehicle prior while
-  # the trailer channel keeps the uninformative default. Order matches the
-  # Stan model's positional use of b[1]/b[2], not alphabetical.
-  value_lognormal_mu_b = c(
-    priors[["value_lognormal_mu_b_vehicle"]],
-    priors[["value_lognormal_mu_b_trailer"]]
-  ),
-  value_lognormal_sigma_b = c(
-    priors[["value_lognormal_sigma_b_vehicle"]],
-    priors[["value_lognormal_sigma_b_trailer"]]
-  ),
+  value_lognormal_sigma_b = priors["value_lognormal_sigma_b"],      #the SD hyperparameter in the prior distribution b; default = 1  
   value_normal_sigma_B1 = priors["value_normal_sigma_B1"],        #the SD hyperparameter in the prior distribution B1; default = 5  
   value_normal_mu_mu_C = priors["value_normal_mu_mu_C"], #the mean hyperparameter in the prior distribution mu_C; median (log-space); default = 0.02 (was originally  0.05) 
   value_normal_sigma_mu_C = priors["value_normal_sigma_mu_C"],    #the SD hyperparameter in the prior distribution mu_C; normal sd (log-space); default = 1.5 (was originally 5)

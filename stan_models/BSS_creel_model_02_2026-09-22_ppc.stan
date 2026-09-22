@@ -1,3 +1,23 @@
+// ==============================================================================
+// Forked from BSS_creel_model_02_2021-01-22_ppc.stan on 2026-09-22.
+//
+// ONE CHANGE: b's prior is vectorised per index channel --
+//   b[g] ~ lognormal(value_lognormal_mu_b[g], value_lognormal_sigma_b[g])
+// -- instead of one value_lognormal_sigma_b shared by both channels with mu
+// fixed at 0. This is for a census-free fishery-year: without census (tie-in)
+// counts, b has no likelihood anchor (E_s/B_s, which observe true effort
+// directly, are the terms that would otherwise update it -- V_I/T_I only
+// observe effort*b), so its posterior sits at whatever prior it is given.
+// Vectorising lets the vehicle channel carry a history-derived prior while
+// the trailer channel keeps lognormal(0,1), since two years of trailer data
+// disagree badly enough that a history-derived trailer prior comes out wider
+// than assuming nothing.
+//
+// Everything else in this file is identical to the 2021-01-22_ppc parent --
+// diff against it to confirm. Kept as a SEPARATE dated file rather than
+// edited in place: this is a one-off for one census-free fishery-year, not
+// a change to the model every other basin's fit also runs against.
+// ==============================================================================
 data{
     //Day attributes
 	int<lower=0> D; //number of fishing days (sampling frame)
@@ -62,7 +82,8 @@ data{
 	real value_betashape_phi_E_scaled; //the rate (alpha) and shape (beta) hyperparameters in phi_E_scaled 
 	real value_normal_sigma_omega_C_0; // the SD hyperparameter in the prior distribution omega_C_0
 	real value_normal_sigma_omega_E_0; // the SD hyperparameter in the prior distribution omega_E_0
-	real value_lognormal_sigma_b; //the SD hyperparameter in the prior distribution b
+	vector[G] value_lognormal_mu_b; //the mean hyperparameter (on the log scale) in the prior distribution b, per gear/index type
+	vector<lower=0>[G] value_lognormal_sigma_b; //the SD hyperparameter in the prior distribution b, per gear/index type. Was a single real shared by both channels -- vectorised (2026-09-22) so vehicle and trailer can carry different priors, for a census-free fishery-year using a history-derived vehicle prior with the trailer channel left at the uninformative default.
 	real value_normal_mu_mu_C; //the mean hyperparameter in the prior distribution mu_C
 	real value_normal_sigma_mu_C; //the SD hyperparameter in the prior distribution mu_C
 	real value_normal_mu_mu_E; //the mean hyperparameter in the prior distribution mu_E
@@ -179,7 +200,7 @@ model{
 		}
 		R_V[g] ~ beta(0.5,0.5); //Note: leaving constant among days AND sections...may need to tweak; can make beta because is "true" angler cars or angler trailers per angler!
 		R_T[g] ~ beta(0.5,0.5); //Note: leaving constant among days AND sections...may need to tweak; can make beta because is "true" angler cars or angler trailers per angler!
-		b[g] ~ lognormal(0,value_lognormal_sigma_b); //Note: leaving constant among days AND sections...may need to tweak could go as low as 0.25 for sigma
+		b[g] ~ lognormal(value_lognormal_mu_b[g],value_lognormal_sigma_b[g]); //Note: leaving constant among days AND sections...may need to tweak could go as low as 0.25 for sigma
 	}
 	//Likelihoods
 	//Index effort counts - vehicles
