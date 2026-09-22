@@ -4,7 +4,7 @@
 # ONE CHANGE: b's prior is assembled as two length-2 vectors (mu and sigma,
 # vehicle then trailer) from four scalar prior names, instead of one
 # value_lognormal_sigma_b passed straight through. Pairs with
-# stan_models/BSS_creel_model_02_2026-09-22_ppc.stan, which declares
+# stan_models/BSS_creel_model_02_2026-09-22_univariate_bprior.stan, which declares
 # value_lognormal_mu_b / value_lognormal_sigma_b as vector[G] instead of a
 # shared real -- the original prep_inputs_bss() would build Stan data this
 # model can't read (no value_lognormal_mu_b field, and a scalar where a

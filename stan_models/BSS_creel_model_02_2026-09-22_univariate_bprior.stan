@@ -1,4 +1,12 @@
 // ==============================================================================
+// BSS_creel_model_02_2026-09-22_univariate_bprior.stan
+//
+// "univariate": no cross-section/cross-gear correlation structure (no
+// Lcorr_E/Lcorr_C) -- each section's effort/CPUE process error is its own
+// independent AR(1) series, as in the univariate parent below, not the
+// jointly-correlated version *_2021-01-22_ppc.stan uses. "bprior": b's prior
+// is vectorised per channel (see change 1 below).
+//
 // Based on BSS_creel_model_09_2022-09-30_1G_1S.stan (supplied 2026-09-22), not
 // on the newer *_2021-01-22_ppc.stan the rest of the pipeline compiles today.
 // This older file already carries the property this fork needs: its model-

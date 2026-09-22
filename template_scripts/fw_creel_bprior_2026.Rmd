@@ -5,7 +5,7 @@
 # separate file rather than edited into fw_creel.Rmd in place, since every
 # other basin's report renders from the original and should not carry this.
 #
-# Pairs with stan_models/BSS_creel_model_02_2026-09-22_ppc.stan (declares the
+# Pairs with stan_models/BSS_creel_model_02_2026-09-22_univariate_bprior.stan (declares the
 # prior as vector[G], not a shared real) and
 # R_functions/prep_inputs_bss_bprior.R (assembles the two vectors from the
 # four scalar params below). Diff against the originals to confirm everything
@@ -30,7 +30,7 @@ params:
   days_wkend: !r c('Saturday', 'Sunday')
   day_length_expansion: "night closure"
   min_fishing_time: 0.5
-  bss_model_file_name: "BSS_creel_model_02_2026-09-22_ppc.stan"  # the vectorised-b-prior fork, not the original
+  bss_model_file_name: "BSS_creel_model_02_2026-09-22_univariate_bprior.stan"  # the vectorised-b-prior fork, not the original
   model_used: "Both models"
   data_grade: "provisional"
   export: "local"
@@ -1112,7 +1112,7 @@ inputs_bss <-
 # mismatch reported here names the fishery and the cause; the same failure from
 # inside the sampler does not.
 # allow_single_gear = TRUE: this fork's model
-# (BSS_creel_model_02_2026-09-22_ppc.stan) is built to take G=1 -- see
+# (BSS_creel_model_02_2026-09-22_univariate_bprior.stan) is built to take G=1 -- see
 # bss_input_fixes.R's preflight_bss_inputs().
 iwalk(inputs_bss, ~preflight_bss_inputs(.x, paste0(params$fishery_name, " / ", .y),
                                         allow_single_gear = TRUE))
