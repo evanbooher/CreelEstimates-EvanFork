@@ -286,6 +286,25 @@ apply_bss_input_fixes <- function(dwg_summ, days, fishery_name) {
 # ------------------------------------------------------------------------------
 
 preflight_bss_inputs <- function(inputs_bss, fishery_name) {
+  # G < 2 (2026-09-22): p_TI/R_V/R_T/lambda are always built for BOTH gear
+  # types (census_expan unconditionally carries bank and boat), but G here is
+  # computed from THIS catch group's own interviews -- filter to a narrow
+  # enough species/life_stage/fin_mark/fate slice and the interviews that
+  # remain can easily be single-gear, especially on a small interview total.
+  # Without this check that surfaces later as a p_TI shape mismatch (2 rows
+  # vs G x S), true but unhelpful for finding the actual cause. Same check
+  # 01_fit_bss_bias.R already makes at its own bss_preflight stage.
+  if (inputs_bss$G < 2) {
+    bss_fix_fail(
+      paste0("Only one angler type (G = ", inputs_bss$G, "); b[2]/lambda[...,2] ",
+             "out of bounds in the BSS likelihood, and p_TI (always 2 rows, bank ",
+             "and boat) will not match G x S. Likely a catch group filtered too ",
+             "narrow for this fishery's interview count -- a pooled group (e.g. ",
+             "catch_groups_df('chinook_all')) keeps both gear types represented."),
+      stage = "bss_preflight"
+    )
+  }
+
   # Declared-count vs. actual-length checks. Stan does not error when these
   # disagree until sampling starts, and then only on the FIRST chain to touch
   # the mismatched variable -- reported as "mismatch in dimension declared and
