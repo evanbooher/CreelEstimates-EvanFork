@@ -22,12 +22,34 @@ get_bss_overview <- function(bss_fit, ecg, ...){
   sp <- rstan::get_sampler_params(bss_fit, inc_warmup = FALSE)
   n_div <- sum(vapply(sp, function(x) sum(x[, "divergent__"]), numeric(1)))
 
+  # n_eff/Rhat for E_sum/C_sum specifically (2026-09-22): rstan's summary()
+  # computes these two columns with a variance-based split-Rhat calculation
+  # that is NOT NaN-tolerant, unlike the mean/sd/quantile columns next to
+  # them -- ONE non-finite draw anywhere in a chain (poisson_rng rate
+  # overflow on low-catch data; see the "Missing or NaN values detected"
+  # warning this same render emits) silently poisons Rhat/n_eff for that
+  # whole parameter, while the rest of the row still looks like a normal,
+  # well-behaved summary. Left as NaN here rather than recomputed on a
+  # filtered subset -- a from-scratch NaN-tolerant Rhat is easy to get
+  # subtly wrong, and this codebase has no rstan/Stan environment to verify
+  # one against. n_finite/n_draws makes the cause visible in the table
+  # itself instead of requiring a trip back through console output: a low
+  # n_div with n_finite == n_draws and Rhat still NaN is a genuine mystery
+  # worth escalating; NaN Rhat alongside even one non-finite draw is this
+  # known, explained case, not evidence sampling failed.
+  finite_frac <- function(par) {
+    draws <- unlist(rstan::extract(bss_fit, pars = par), use.names = FALSE)
+    tibble(estimate = par, n_finite = sum(is.finite(draws)), n_draws = length(draws))
+  }
+  finite_counts <- bind_rows(finite_frac("E_sum"), finite_frac("C_sum"))
+
   bss_fit |>
     summary(pars = c("E_sum", "C_sum")) |>
     pluck("summary") |>
     as.data.frame() |>
     rownames_to_column("estimate") |>
     as_tibble() |>
+    left_join(finite_counts, by = "estimate") |>
     mutate(n_div = n_div, est_cg = ecg) |>
     relocate(estimate, est_cg)
 }
