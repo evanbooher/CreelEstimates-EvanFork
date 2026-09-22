@@ -41,7 +41,47 @@ get_bss_overview <- function(bss_fit, ecg, ...){
     draws <- unlist(rstan::extract(bss_fit, pars = par), use.names = FALSE)
     tibble(estimate = par, n_finite = sum(is.finite(draws)), n_draws = length(draws))
   }
-  finite_counts <- bind_rows(finite_frac("E_sum"), finite_frac("C_sum"))
+
+  # Pareto k-hat (Vehtari, Gelman, Simpson, Yao & Gabry) -- the standard
+  # answer, in the same posterior/loo ecosystem this codebase already uses
+  # for rhat/ess_bulk, to "is the sample mean of these draws even reliable."
+  # It fits a generalised Pareto distribution to the upper tail and returns
+  # its shape parameter; k_hat < 0.5 means the tail is thin enough for the
+  # mean to converge at the usual sqrt(n) rate (trust mean/sd); 0.5-0.7 means
+  # it is estimable but converges slowly (treat with caution); >= 0.7 means
+  # the tail is heavy enough that the sample mean/variance may not even be
+  # finite -- exactly what "mean 185,578 next to a median of 48" is a
+  # symptom of. Median/quantiles, being rank-based rather than moment-based,
+  # stay trustworthy regardless of k_hat -- this diagnoses WHICH columns to
+  # trust, it does not fix the mean/sd columns themselves.
+  #
+  # UNVERIFIED: no R/posterior environment in this repo's working context to
+  # confirm posterior::pareto_khat()'s exact signature against the version
+  # installed. Wrapped so a mismatch reports NA rather than costing a
+  # completed fit -- same failure posture as the rest of this function.
+  pareto_k <- function(par) {
+    draws <- unlist(rstan::extract(bss_fit, pars = par), use.names = FALSE)
+    k <- tryCatch(
+      {
+        val <- posterior::pareto_khat(draws)
+        if (is.list(val)) val$khat else as.numeric(val)[1]
+      },
+      error = function(e) NA_real_
+    )
+    tibble(
+      estimate = par,
+      khat = k,
+      khat_flag = dplyr::case_when(
+        is.na(k)  ~ "not computed",
+        k < 0.5   ~ "mean reliable",
+        k < 0.7   ~ "mean reliable, converges slowly",
+        TRUE      ~ "mean UNRELIABLE -- use median/CI"
+      )
+    )
+  }
+
+  finite_counts <- bind_rows(finite_frac("E_sum"), finite_frac("C_sum")) |>
+    left_join(bind_rows(pareto_k("E_sum"), pareto_k("C_sum")), by = "estimate")
 
   bss_fit |>
     summary(pars = c("E_sum", "C_sum")) |>
