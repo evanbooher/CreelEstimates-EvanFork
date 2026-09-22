@@ -143,7 +143,10 @@ BSS_MODEL_FILE <- "BSS_creel_model_02_2021-01-22_ppc.stan"
 
 # Copied verbatim from template_scripts/fw_creel.Rmd's prep_inputs_bss() call.
 # Held CONSTANT across every fishery-year -- changing the b prior between
-# years would make the whole temporal-stability comparison meaningless.
+# years would make the whole temporal-stability comparison meaningless. The
+# b prior specifically can be overridden per run via BSS_B_PRIOR_OVERRIDE
+# below (for a census-free fishery-year with a history-informed prior);
+# every other prior here stays fixed with no override mechanism.
 BSS_PRIORS <- c(
   value_cauchyDF_sigma_eps_C   = 0.5,
   value_cauchyDF_sigma_eps_E   = 0.5,
@@ -153,7 +156,14 @@ BSS_PRIORS <- c(
   value_cauchyDF_sigma_mu_E    = 0.5,
   value_normal_sigma_omega_C_0 = 1,
   value_normal_sigma_omega_E_0 = 3,
-  value_lognormal_sigma_b      = 1,     # <-- this is the number get_bss_bias() needs as prior_sigma_b
+  # b's prior, per channel (b[1] vehicle, b[2] trailer -- see get_bss_bias.R).
+  # Was one value_lognormal_sigma_b shared by both with mu fixed at 0;
+  # decomposed into four scalars so vehicle and trailer can diverge. This
+  # default reproduces the old lognormal(0,1)-for-both behaviour exactly.
+  value_lognormal_mu_b_vehicle    = 0,
+  value_lognormal_mu_b_trailer    = 0,
+  value_lognormal_sigma_b_vehicle = 1,
+  value_lognormal_sigma_b_trailer = 1,
   value_normal_sigma_B1        = 5,
   value_normal_mu_mu_C         = log(0.02),
   value_normal_sigma_mu_C      = 1.5,
@@ -162,6 +172,39 @@ BSS_PRIORS <- c(
   value_betashape_phi_E_scaled = 1,
   value_betashape_phi_C_scaled = 1
 )
+
+# Explicit, single-purpose override for the b prior on THIS run. NULL (the
+# default) leaves BSS_PRIORS untouched, so every fishery-year keeps the
+# shared lognormal(0,1)-for-both-channels default unless this is set by hand
+# immediately before sourcing -- e.g. for a census-free fishery-year:
+#
+#   BSS_B_PRIOR_OVERRIDE <- list(mu_vehicle = 0.20, sigma_vehicle = 0.43)
+#   source(here::here("analysis", "bss_bias", "01_fit_bss_bias.R"))
+#
+# Only the names supplied are changed; anything left out (here, the trailer
+# prior) keeps BSS_PRIORS' default. There is no per-fishery-year keying --
+# it applies to every fishery this run fits, so scope ONLY_FISHERIES to the
+# one fishery-year the override is meant for.
+if (!exists("BSS_B_PRIOR_OVERRIDE", inherits = FALSE)) BSS_B_PRIOR_OVERRIDE <- NULL
+if (!is.null(BSS_B_PRIOR_OVERRIDE)) {
+  b_prior_names <- c(mu_vehicle = "value_lognormal_mu_b_vehicle",
+                     mu_trailer = "value_lognormal_mu_b_trailer",
+                     sigma_vehicle = "value_lognormal_sigma_b_vehicle",
+                     sigma_trailer = "value_lognormal_sigma_b_trailer")
+  unknown <- setdiff(names(BSS_B_PRIOR_OVERRIDE), names(b_prior_names))
+  if (length(unknown) > 0) {
+    cli::cli_abort(
+      "BSS_B_PRIOR_OVERRIDE has unknown name{?s} {.val {unknown}} -- expected \
+       from {.val {names(b_prior_names)}}."
+    )
+  }
+  BSS_PRIORS[b_prior_names[names(BSS_B_PRIOR_OVERRIDE)]] <- unlist(BSS_B_PRIOR_OVERRIDE)
+  cli::cli_alert_warning(
+    "b prior OVERRIDDEN for this run: {paste(names(BSS_B_PRIOR_OVERRIDE), \
+     unlist(BSS_B_PRIOR_OVERRIDE), sep = '=', collapse = ', ')}. Applies to \
+     every fishery-year this run fits -- check ONLY_FISHERIES is scoped."
+  )
+}
 
 # Only parameters actually needed downstream are monitored -- excludes
 # eps_E_H / lambda_E_S_I / lambda_E_S / lambda_C_S / omega_*, which dominate
@@ -1065,7 +1108,10 @@ fit_one_fishery <- function(fishery_name, fit_config_name = FIT_CONFIG_NAME, est
 
   bias_summary <- run_stage("get_bss_bias", {
     get_bss_bias(bss_fit, fishery_name = out_name, ecg = chosen_ecg,
-                 prior_sigma_b = BSS_PRIORS[["value_lognormal_sigma_b"]])
+                 prior_mu_b = c(vehicle = BSS_PRIORS[["value_lognormal_mu_b_vehicle"]],
+                               trailer = BSS_PRIORS[["value_lognormal_mu_b_trailer"]]),
+                 prior_sigma_b = c(vehicle = BSS_PRIORS[["value_lognormal_sigma_b_vehicle"]],
+                                   trailer = BSS_PRIORS[["value_lognormal_sigma_b_trailer"]]))
   }) |>
     mutate(
       fit_config = fit_config_name, model_file = BSS_MODEL_FILE, n_div = n_div, runtime_sec = runtime_sec,

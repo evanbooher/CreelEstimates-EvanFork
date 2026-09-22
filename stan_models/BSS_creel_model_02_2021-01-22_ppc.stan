@@ -62,7 +62,8 @@ data{
 	real value_betashape_phi_E_scaled; //the rate (alpha) and shape (beta) hyperparameters in phi_E_scaled 
 	real value_normal_sigma_omega_C_0; // the SD hyperparameter in the prior distribution omega_C_0
 	real value_normal_sigma_omega_E_0; // the SD hyperparameter in the prior distribution omega_E_0
-	real value_lognormal_sigma_b; //the SD hyperparameter in the prior distribution b
+	vector[G] value_lognormal_mu_b; //the mean hyperparameter (on the log scale) in the prior distribution b, per gear/index type
+	vector<lower=0>[G] value_lognormal_sigma_b; //the SD hyperparameter in the prior distribution b, per gear/index type. Was a single real shared by both channels -- vectorised so vehicle and trailer can carry different priors (e.g. history-informed vehicle, uninformative trailer).
 	real value_normal_mu_mu_C; //the mean hyperparameter in the prior distribution mu_C
 	real value_normal_sigma_mu_C; //the SD hyperparameter in the prior distribution mu_C
 	real value_normal_mu_mu_E; //the mean hyperparameter in the prior distribution mu_E
@@ -179,7 +180,7 @@ model{
 		}
 		R_V[g] ~ beta(0.5,0.5); //Note: leaving constant among days AND sections...may need to tweak; can make beta because is "true" angler cars or angler trailers per angler!
 		R_T[g] ~ beta(0.5,0.5); //Note: leaving constant among days AND sections...may need to tweak; can make beta because is "true" angler cars or angler trailers per angler!
-		b[g] ~ lognormal(0,value_lognormal_sigma_b); //Note: leaving constant among days AND sections...may need to tweak could go as low as 0.25 for sigma
+		b[g] ~ lognormal(value_lognormal_mu_b[g],value_lognormal_sigma_b[g]); //Note: leaving constant among days AND sections...may need to tweak could go as low as 0.25 for sigma
 	}
 	//Likelihoods
 	//Index effort counts - vehicles

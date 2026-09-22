@@ -29,6 +29,17 @@ params:
   save_draws: FALSE  # TRUE keeps posterior draws in estimates_bss.rds (needed by any downstream analysis that reads C_sum/E_sum/b)
   section_filter: !r numeric(0)  # e.g. c(1,2,3) to estimate only those sections; empty keeps every section the fetch returns
   trim_to_last_sampled: FALSE  # TRUE pulls est_date_end back to the last date actually sampled within the window
+  # b's prior (see get_bss_bias.R / analysis/bss_bias/01_fit_bss_bias.R's
+  # BSS_B_PRIOR_OVERRIDE for the matching per-fishery override mechanism used
+  # by 10_render_fw_creel.R). Defaults reproduce lognormal(0,1) for both
+  # channels -- the model's long-standing uninformative default. Override for
+  # a census-free fishery-year, e.g. value_lognormal_mu_b_vehicle: 0.20 with
+  # value_lognormal_sigma_b_vehicle: 0.43, leaving the trailer pair at default
+  # when history is no better than uninformative for that channel.
+  value_lognormal_mu_b_vehicle: 0
+  value_lognormal_mu_b_trailer: 0
+  value_lognormal_sigma_b_vehicle: 1
+  value_lognormal_sigma_b_trailer: 1
 output:
   html_document:
     toc: true
@@ -1039,7 +1050,10 @@ inputs_bss <-
         value_cauchyDF_sigma_mu_E = 0.5, 
         value_normal_sigma_omega_C_0 = 1,
         value_normal_sigma_omega_E_0 = 3,
-        value_lognormal_sigma_b = 1,
+        value_lognormal_mu_b_vehicle = params$value_lognormal_mu_b_vehicle,
+        value_lognormal_mu_b_trailer = params$value_lognormal_mu_b_trailer,
+        value_lognormal_sigma_b_vehicle = params$value_lognormal_sigma_b_vehicle,
+        value_lognormal_sigma_b_trailer = params$value_lognormal_sigma_b_trailer,
         value_normal_sigma_B1 = 5,  
         # Catch-rate prior centred on the rate actually observed for THIS catch
         # group, rather than a fixed log(0.02). fish_count is the group's fish
