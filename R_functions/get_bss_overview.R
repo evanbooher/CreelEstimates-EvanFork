@@ -61,17 +61,28 @@ get_bss_overview <- function(bss_fit, ecg, ...){
   # completed fit -- same failure posture as the rest of this function.
   pareto_k <- function(par) {
     draws <- unlist(rstan::extract(bss_fit, pars = par), use.names = FALSE)
+    err_msg <- NULL
     k <- tryCatch(
       {
         val <- posterior::pareto_khat(draws)
         if (is.list(val)) val$khat else as.numeric(val)[1]
       },
-      error = function(e) NA_real_
+      error = function(e) {
+        err_msg <<- conditionMessage(e)
+        NA_real_
+      }
     )
     tibble(
       estimate = par,
       khat = k,
+      # err_msg surfaced in khat_flag itself (not a separate silently-dropped
+      # column) so a call signature/version mismatch shows up in the
+      # rendered table directly -- this repo's working context has no
+      # R/posterior environment to test pareto_khat()'s exact signature
+      # against the installed version, so "not computed" alone would give
+      # no way to tell a real version mismatch from a data-driven NA.
       khat_flag = dplyr::case_when(
+        !is.null(err_msg) ~ paste0("error: ", err_msg),
         is.na(k)  ~ "not computed",
         k < 0.5   ~ "mean reliable",
         k < 0.7   ~ "mean reliable, converges slowly",
