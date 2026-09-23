@@ -92,10 +92,21 @@ get_bss_overview <- function(bss_fit, ecg, ...){
   # non-finite draws poisoning a diagnostic that isn't itself NaN-tolerant.
   # Filtering to is.finite() draws before the call (pareto_khat pools all
   # chains into one vector already, so no rectangular-matrix constraint
-  # here, unlike rhat/ess above) is the same fix in the same spirit.
+  # here, unlike rhat/ess above) is necessary just to get a number back --
+  # but unlike Rhat/ESS, this is NOT a free pass to trust that number as-is.
+  # A draw that overflowed to non-finite IS tail evidence, arguably the
+  # strongest kind available: it means the tail is heavy enough to exceed
+  # floating-point range, not merely heavy enough to worry about. Computing
+  # k-hat only on the survivors that stayed finite can come back looking
+  # reassuring (k<0.5) on a distribution that just broke the sampler --
+  # understating exactly what k-hat exists to catch. So any non-finite draw
+  # present overrides the filtered k-hat's own verdict below, rather than
+  # letting a low k-hat computed on the cleaned-up remainder speak for the
+  # whole distribution.
   pareto_k <- function(par) {
     draws <- unlist(rstan::extract(bss_fit, pars = par), use.names = FALSE)
     draws_finite <- draws[is.finite(draws)]
+    n_nonfinite <- length(draws) - length(draws_finite)
     err_msg <- NULL
     k <- tryCatch(
       {
@@ -110,11 +121,14 @@ get_bss_overview <- function(bss_fit, ecg, ...){
     tibble(
       estimate = par,
       khat = k,
-      # err_msg surfaced in khat_flag itself (not a separate silently-dropped
-      # column) so a call signature/version mismatch shows up in the
-      # rendered table directly.
+      # err_msg / n_nonfinite surfaced in khat_flag itself (not a separate
+      # silently-dropped column) so a call signature/version mismatch, or a
+      # k-hat computed on a tail with its most extreme points removed,
+      # shows up in the rendered table directly rather than needing the
+      # n_finite/n_draws columns cross-referenced by hand.
       khat_flag = dplyr::case_when(
         !is.null(err_msg) ~ paste0("error: ", err_msg),
+        n_nonfinite > 0 ~ paste0("mean UNRELIABLE -- ", n_nonfinite, " draw(s) overflowed to non-finite"),
         is.na(k)  ~ "not computed",
         k < 0.5   ~ "mean reliable",
         k < 0.7   ~ "mean reliable, converges slowly",
