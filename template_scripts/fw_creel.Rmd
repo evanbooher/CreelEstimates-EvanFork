@@ -1566,7 +1566,7 @@ purrr::iwalk(diagnostics_bss, function(diag, ecg) {
 
 ### BSS estimates summary
 
-```{r BSS_summary, eval=!params$fit_only}
+```{r BSS_summary, eval=!params$fit_only, results='asis'}
 
 # get_bss_overview() is guarded in the estimates_bss chunk, so a group can be
 # present with overview = NULL. Dropping those here keeps one unbuildable
