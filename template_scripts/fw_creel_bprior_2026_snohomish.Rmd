@@ -70,11 +70,11 @@ params:
   # 2023 and 2024, Sep 18 - Oct 31 (13_snohomish_scope_compare.R).
   #
   # vehicle -- prior_id sno_main_2026_vehicle: lognormal(0.38, 0.10),
-  #   median 1.47, 95% 1.22-1.78. From b = 1.37, 1.57.
+  #   median 1.46, 95% 1.20-1.78. From b = 1.37, 1.57.
   #   NARROWER than 2024's own 95% interval (1.35-1.84) -- two close years
   #   give a small tau. The ledger flags this (contains_center_intervals).
   # trailer -- prior_id sno_main_2026_trailer: lognormal(0.01, 0.19),
-  #   median 1.01, 95% 0.69-1.48. From b = 0.89, 1.14.
+  #   median 1.01, 95% 0.70-1.47. From b = 0.89, 1.14.
   value_lognormal_mu_b_vehicle: 0.38
   value_lognormal_mu_b_trailer: 0.01
   value_lognormal_sigma_b_vehicle: 0.10

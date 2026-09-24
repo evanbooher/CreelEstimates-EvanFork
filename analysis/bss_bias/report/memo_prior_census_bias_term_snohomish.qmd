@@ -102,6 +102,21 @@ b_or_empty <- function() {
 fmt <- function(x, d = 2) ifelse(is.na(x), "—", formatC(x, format = "f", digits = d))
 n_fmt <- function(x) ifelse(is.na(x), "—", formatC(x, format = "d", big.mark = ","))
 
+# The 2026 priors, read from the ledger 14_derive_b_prior.R writes -- the
+# applied values, which are what the Snohomish render uses, with the range
+# computed from them. Nothing typed in, same as every other number here.
+ledger <- read_if("bss_b_prior_ledger.csv")
+
+prior_text <- function(id) {
+  p <- if (is.null(ledger)) NULL else dplyr::filter(ledger, prior_id == id)
+  if (is.null(p) || nrow(p) != 1) return("— (run 14_derive_b_prior.R)")
+  z <- qnorm(0.975)
+  sprintf("lognormal(%.2f, %.2f), median %.2f, 95 percent range %.2f–%.2f",
+          p$applied_mu, p$applied_sigma, exp(p$applied_mu),
+          exp(p$applied_mu - z * p$applied_sigma),
+          exp(p$applied_mu + z * p$applied_sigma))
+}
+
 have_fits <- !is.null(b_all) &&
   any(FITS$out_name %in% b_all$fishery_name[b_all$bias_type == "vehicle"])
 ```
@@ -128,7 +143,7 @@ bias terms from prior years to inform the bias correction used in the current ye
 
 We propose to generate bias terms for vehicle and trailer index counts from the fishery’s own prior years. The distribution of a historical bias term should be wide enough to span variability observed in the past. Following a review of b parameter estimates encompassing entire fishery seasons, we evaluated the same parameter on a subset of data for years 2023 and 2024 on the Snohomish mainstem to achieve a comparable temporal and spatial footprint of the 2026 fishery.
 
-The two most recent Snohomish seasons were compared on a common window, September 18th to October 31st -- the largest span of continuous paired survey activity common to both years, rather than the two seasons' own broader date-range overlap, which spans a real gap in survey activity both years show in late October before resuming in November. The comparison is restricted to the Snohomish mainstem (river miles 0-20.5, from the mouth to the confluence of the Skykomish and Snoqualmie Rivers), surveyed from the same eleven access sites in both years. Survey coverage was not equal between the two years: 2023 had nine paired census-and-index days in this window against three in 2024, so the 2024 estimate rests on substantially less anchoring data (@tbl-survey).
+The two most recent Snohomish seasons were compared on a common window, September 18th to October 31st, the span in which both seasons surveyed the mainstem continuously (the 2024 season itself opened September 21st). The comparison is restricted to the Snohomish mainstem, from the mouth to the confluence of the Skykomish and Snoqualmie Rivers, surveyed from the same eleven access sites in both years. Survey coverage was not equal between the two years: 2023 had nine paired census-and-index days in this window against three in 2024, so the 2024 estimate rests on substantially less anchoring data (@tbl-survey).
 
 
 ```{r pending-note, results = "asis"}
@@ -251,4 +266,4 @@ if (nrow(fig_dat) > 0) {
 }
 ```
 
-For 2026 vehicle and trailer bias terms in the creel model, we propose placing a lognormal prior on b, using the mean and variance of the b parameters for vehicle and trailer counts from that fishery’s own prior years (@tbl-b, @fig-b). Adjusting code and model structure may be needed to accommodate this modification. This action requires an additional assumption that the index to census relationship is stable enough between the prior years and 2026 for a past b to be representative, and that a b parameter based on historical data sufficiently captures the parameter’s inter annual variability. If any census data is collected this season, the prior and the census data would combine, and the b parameter will update whenever there is adequate data. This work would occur in collaboration with Tulalip Tribal technical staff, with all code and supporting documentation made available for all participants. Regarding budget impacts to staffing, in 2026 fisheries we plan to sample at minimum three days per week (two weekdays, one weekend day) in open sections of river.
+For 2026, we propose a lognormal prior on b for each index type, set from the Snohomish mainstem's own 2023 and 2024 estimates (@tbl-b, @fig-b). Each prior is centred on the average of the two years' estimates on the log scale. Its width combines two sources of uncertainty: the variation between the two years beyond what each year's own sampling error explains, and the uncertainty in the two-year average itself. The result describes a plausible value for a new year, not only the range between the two observed years. The vehicle prior is `r prior_text("sno_main_2026_vehicle")`, and the trailer prior is `r prior_text("sno_main_2026_trailer")`. The creel model has been modified to take a separate prior for each index type; its structure is otherwise unchanged. With only two years, the width of each prior is itself uncertain: the vehicle prior's range stops short of the upper end of the 2024 estimate's own interval, and whether to widen it is a question for review with co-managers. The derivation and every input to it are recorded with the code. This action requires an additional assumption that the index to census relationship is stable enough between the prior years and 2026 for a past b to be representative, and that a b parameter based on historical data sufficiently captures the parameter’s inter annual variability. If any census data is collected this season, the prior and the census data would combine, and the b parameter will update whenever there is adequate data. This work would occur in collaboration with Tulalip Tribal technical staff, with all code and supporting documentation made available for all participants. Regarding budget impacts to staffing, in 2026 fisheries we plan to sample at minimum three days per week (two weekdays, one weekend day) in open sections of river.

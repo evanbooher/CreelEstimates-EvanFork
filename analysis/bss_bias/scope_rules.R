@@ -186,15 +186,12 @@ WINDOW_RESTRICTIONS <- list(
   # THE SNOHOMISH FORK COMPARISON WINDOW -- Sep 18 to Oct 31, 2023 and 2024.
   #
   # Not the two seasons' own overlap (2023-09-01 to 2023-11-30, 2024-09-21 to
-  # 2024-11-30 -- an overlap of 2024-09-21 to 2023-11-30). Both years' actual
-  # survey activity has a real gap in late October before picking back up in
-  # November (confirmed from the survey-coverage chart, not assumed from the
-  # lookup's season dates), so the wider overlap would include weeks of dead
-  # air in the middle of the window rather than more comparable data. Sep 18
-  # to Oct 31 is the largest span of CONTINUOUS paired survey activity common
-  # to both years -- chosen the same way as Stillaguamish's own Sep 16-Oct 31
-  # window above, and landing on nearly the same calendar dates is
-  # coincidence confirmed independently, not copied from it.
+  # 2024-11-30). Chosen from the survey-coverage chart as the span in which
+  # both years surveyed the mainstem continuously; 2024's season opened Sep
+  # 21, so its effective start is that. Paired census anchors fall throughout
+  # (2023 has them on Oct 27 and 30), so the end date is where comparable
+  # mainstem coverage stops, not the edge of a gap inside the window. Lands
+  # on nearly the same dates as Stillaguamish's Sep 16 - Oct 31 above.
   list(pattern = regex("^Snohomish fall salmon 2023$"),
        scope_tag = c("SN_MAIN", "SN_SKY"),
        est_date_start = "2023-09-18",
