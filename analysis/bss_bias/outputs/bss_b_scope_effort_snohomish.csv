@@ -1,0 +1,5 @@
+year,fit,scope,fishery_name,window_start,window_end,sections,n_index_sites,n_index_days,n_census_days,n_paired_anchors,anchor_dates,census_anglers_bank,census_anglers_boat,index_vehicles,index_trailers
+2023,SN_MAIN 2023,SN_MAIN,Snohomish fall salmon 2023,2023-09-18,2023-10-31,"1, 2",11,25,9,9,"2023-09-20, 2023-09-26, 2023-10-01, 2023-10-06, 2023-10-12, 2023-10-15, 2023-10-21, 2023-10-27, 2023-10-30",681,657,7419,1710
+2024,SN_MAIN 2024,SN_MAIN,Snohomish fall salmon 2024,2024-09-18,2024-10-31,"1, 2",11,24,3,3,"2024-09-25, 2024-10-05, 2024-10-22",118,175,3676,1221
+2023,SN_SKY 2023,SN_SKY,Snohomish fall salmon 2023,2023-09-18,2023-10-31,3,9,5,2,2,"2023-10-27, 2023-10-30",53,14,451,26
+2024,SN_SKY 2024,SN_SKY,Snohomish fall salmon 2024,2024-09-18,2024-10-31,,0,0,0,0,,0,0,0,0
