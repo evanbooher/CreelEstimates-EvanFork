@@ -1,0 +1,254 @@
+---
+title: "Using prior census data to set the effort-index bias term"
+date: 2026-09-24
+format:
+  docx:
+    # Calibri, black, one body size. Built by make_reference_docx.R -- run that
+    # once and commit the result; without the file the docx render fails.
+    reference-doc: reference-plain.docx
+  html:
+    embed-resources: true
+    toc: false
+execute:
+  echo: false
+  warning: false
+  message: false
+editor:
+  markdown:
+    wrap: 72
+---
+
+```{r setup}
+# ==============================================================================
+# The memo's numbers come from the modelling outputs, not from the prose.
+#
+# Nothing below is typed in. The b estimates and intervals are read from
+# bss_b_summary.csv (written by 01_fit_bss_bias.R) and the survey counts from
+# bss_b_scope_effort_snohomish.csv (13_snohomish_scope_compare.R). Re-render
+# after a refit and the memo is current.
+#
+# bss_b_scope_effort_snohomish.csv, NOT bss_b_scope_effort.csv: that file is
+# Stillaguamish's own audit output (12_fork_scope_compare.R), overwritten
+# whole on every run of that script -- reading it here would either show
+# nothing for Snohomish or, worse, silently show whichever basin ran last.
+# The separate filename is the same isolation 13's own header explains.
+#
+# kable(), not gt(): gt does not render to Word, and this memo is edited in
+# Word. The same file produces .docx and .html.
+# ==============================================================================
+library(tidyverse)
+library(knitr)
+
+OUT_DIR <- here::here("analysis", "bss_bias", "outputs")
+
+read_if <- function(f) {
+  p <- file.path(OUT_DIR, f)
+  if (file.exists(p)) readr::read_csv(p, show_col_types = FALSE) else NULL
+}
+
+b_all  <- read_if("bss_b_summary.csv")
+effort <- read_if("bss_b_scope_effort_snohomish.csv")
+
+# Mainstem only for now (SN_MAIN, sections 1+2 pooled by water body -- see
+# scope_rules.R). Skykomish (SN_SKY) is deliberately left out: SN_SKY 2024
+# returned zero survey days under this same window when audited (likely a
+# section-numbering question between the committed location lookup and the
+# live fetch, not yet resolved), and both SN_SKY years already trip the
+# trailer data-limited floor even where they do have data. Depending on how
+# the fishery develops later this fall, Skykomish may need to be added --
+# doing so is exactly two rows here, uncommented:
+#
+#   "Skykomish 2023",  "SN_SKY",  "Snohomish fall salmon 2023",
+#   "Skykomish 2024",  "SN_SKY",  "Snohomish fall salmon 2024",
+#
+# plus fitting SN_SKY through 01 (RUN_SCOPE <- SCOPE_PRESETS$SN_SKY) and
+# re-running 13_snohomish_scope_compare.R -- no other change to this file,
+# since every table/figure below is already built generically off FITS.
+FITS <- tibble::tribble(
+  ~fit,             ~scope,    ~fishery_name,
+  "Mainstem 2023",  "SN_MAIN", "Snohomish fall salmon 2023",
+  "Mainstem 2024",  "SN_MAIN", "Snohomish fall salmon 2024"
+) |>
+  mutate(
+    out_name = paste0(fishery_name, " [", scope, "]"),
+    # 13_snohomish_scope_compare.R keys its outputs on "<scope> <year>" --
+    # "SN_MAIN 2023" -- not on the display label used in this memo. Derived
+    # the same way 13 derives it, so the two cannot drift.
+    scope_fit = paste(scope, as.integer(str_extract(fishery_name, "\\d{4}")))
+  )
+
+# A fallback of tibble(fit = character()) joins cleanly but carries none of
+# the columns the chunks then reference, so a missing outputs file failed with
+# "object 'n_paired_anchors' not found" instead of rendering em dashes -- the
+# exact case the fallback exists to cover. These carry the columns, empty.
+empty_like <- function(key, num_cols) {
+  out <- tibble::tibble(.rows = 0)
+  out[[key]] <- character()
+  for (n in num_cols) out[[n]] <- numeric()
+  out
+}
+
+effort_or_empty <- function() {
+  effort %||% empty_like("fit", c("n_index_sites", "n_index_days", "n_paired_anchors",
+                                  "census_anglers_bank", "census_anglers_boat"))
+}
+
+b_or_empty <- function() {
+  if (!is.null(b_all)) return(b_all)
+  empty_like("fishery_name", c("median", "q2.5", "q97.5")) |>
+    dplyr::mutate(bias_type = character())
+}
+
+fmt <- function(x, d = 2) ifelse(is.na(x), "—", formatC(x, format = "f", digits = d))
+n_fmt <- function(x) ifelse(is.na(x), "—", formatC(x, format = "d", big.mark = ","))
+
+have_fits <- !is.null(b_all) &&
+  any(FITS$out_name %in% b_all$fishery_name[b_all$bias_type == "vehicle"])
+```
+
+Technical memo describing proposed modifications to effort
+bias-correction approach for Snohomish basin
+freshwater fishery monitoring for 2026.
+
+Following the elimination of WDFW's District 13 freshwater salmon
+harvest monitoring budget, funding was reduced for sampling staff and data collection, including aerial census effort counts (also known as tie-in
+counts) for the Snohomish mainstem fall salmon fishery in 2026.
+These surveys areused to estimate a census-index bias parameter (referred to as `b`), which corrects for under or overcounts of anglers obtained during index counts of vehicles
+and boat trailers at access sites. Measuring it requires census counts
+run alongside index counts on the same day, time, and river section.
+Without either in-season census counts or an informative prior on the
+creel model's b parameter, the index counts of vehicles and trailers
+would be assumed to be an unbiased measure of fishing effort. Where
+census are reduced or eliminated this season, WDFW proposes to use
+historical data, where available and appropriate, for census-index effort
+bias terms from prior years to inform the bias correction used in the current year.
+
+
+## Proposed action
+
+We propose to generate bias terms for vehicle and trailer index counts from the fishery’s own prior years. The distribution of a historical bias term should be wide enough to span variability observed in the past. Following a review of b parameter estimates encompassing entire fishery seasons, we evaluated the same parameter on a subset of data for years 2023 and 2024 on the Snohomish mainstem to achieve a comparable temporal and spatial footprint of the 2026 fishery.
+
+The two most recent Snohomish seasons were compared on a common window, September 18th to October 31st -- the largest span of continuous paired survey activity common to both years, rather than the two seasons' own broader date-range overlap, which spans a real gap in survey activity both years show in late October before resuming in November. The comparison is restricted to the Snohomish mainstem (river miles 0-20.5, from the mouth to the confluence of the Skykomish and Snoqualmie Rivers), surveyed from the same eleven access sites in both years. Survey coverage was not equal between the two years: 2023 had nine paired census-and-index days in this window against three in 2024, so the 2024 estimate rests on substantially less anchoring data (@tbl-survey).
+
+
+```{r pending-note, results = "asis"}
+if (!have_fits) {
+  cat("TO BE COMPLETED when the current fits finish. Bias term values below are",
+      "not yet available.\n")
+}
+```
+
+
+
+```{r}
+#| label: tbl-survey
+#| tbl-cap: "Survey effort behind each bias term, on the common September 18 to October 31 window."
+counts <- FITS |>
+  left_join(
+    effort_or_empty() |>
+      select(fit, n_index_sites, n_index_days, n_paired_anchors,
+             census_anglers_bank, census_anglers_boat),
+    by = c("scope_fit" = "fit")
+  ) |>
+  transmute(
+    Fit = fit,
+    `Index sites`  = n_fmt(n_index_sites),
+    `Index days`   = n_fmt(n_index_days),
+    `Census days`  = n_fmt(n_paired_anchors),
+    `Bank anglers` = n_fmt(census_anglers_bank),
+    `Boat anglers` = n_fmt(census_anglers_boat)
+  )
+
+kable(counts)
+```
+
+{{< pagebreak >}}
+
+Estimated bias terms for both index types are given in @tbl-b.
+
+```{r}
+#| label: tbl-b
+#| tbl-cap: "Estimated census-index bias terms with 95 percent credible intervals."
+# BOTH index types, one row each, rather than a vehicle-only table with the
+# trailer term suppressed underneath it. A wide interval is itself the finding
+# and reads more honestly than an absence, so the table reports the trailer
+# term and lets the interval carry the caveat.
+#
+# Long rather than wide: eight rows of four narrow columns, not four rows of
+# six. Word wraps a numeric header one character per line when the table runs
+# past the text block.
+b_tbl <- FITS |>
+  tidyr::crossing(bias_type = c("vehicle", "trailer")) |>
+  left_join(
+    b_or_empty() |> select(out_name = fishery_name, bias_type, median, q2.5, q97.5),
+    by = c("out_name", "bias_type")
+  ) |>
+  arrange(match(fit, FITS$fit), desc(bias_type)) |>
+  transmute(
+    Fit = fit,
+    Index = if_else(bias_type == "vehicle", "Vehicle", "Trailer"),
+    b = fmt(median),
+    `95 percent interval` = ifelse(is.na(median), "—",
+                                   paste0(fmt(q2.5), "–", fmt(q97.5)))
+  )
+
+kable(b_tbl)
+```
+
+@fig-b shows the same estimates on a log scale, where the width of an
+interval is comparable between terms of different size.
+
+&nbsp;
+
+```{r}
+#| label: fig-b
+#| fig-cap: "Bias term estimates and 95 percent credible intervals. The dashed line marks b = 1, where index counts are an unbiased measure of effort."
+#| fig-width: 6.5
+#| fig-height: 2.8
+#| fig-dpi: 300
+# fig-dpi stays inside the `#|` block: Quarto reads cell options only up to the
+# first line that is not `#|`, so a plain comment in the middle of them drops
+# everything below it. Word embeds a raster and the default is 96 dpi, which is
+# what made the figure grainy on the page.
+#
+# Built here from bss_b_summary.csv rather than read as an image, so the figure
+# refreshes with the fits and the memo stays self-contained.
+#
+# Log x: b is multiplicative -- catch scales as 1/b -- so a factor-of-two
+# difference should look the same whether it sits at 0.5 or at 4. On a linear
+# axis the trailer intervals would flatten the vehicle ones to nothing.
+fig_dat <- FITS |>
+  tidyr::crossing(bias_type = c("vehicle", "trailer")) |>
+  left_join(
+    b_or_empty() |> select(out_name = fishery_name, bias_type, median, q2.5, q97.5),
+    by = c("out_name", "bias_type")
+  ) |>
+  filter(!is.na(median)) |>
+  mutate(
+    Index = factor(if_else(bias_type == "vehicle", "Vehicle", "Trailer"),
+                   levels = c("Vehicle", "Trailer")),
+    fit   = factor(fit, levels = rev(FITS$fit))
+  )
+
+if (nrow(fig_dat) > 0) {
+  ggplot(fig_dat, aes(x = median, y = fit)) +
+    geom_vline(xintercept = 1, linetype = "dashed", colour = "grey40") +
+    geom_errorbarh(aes(xmin = q2.5, xmax = q97.5), height = 0.18) +
+    geom_point(size = 2) +
+    facet_wrap(~Index) +
+    scale_x_log10() +
+    labs(x = "Bias term b", y = NULL) +
+    theme_bw(base_size = 10) +
+    # theme_bw() sets axis text to grey30. Every piece of type in the figure is
+    # black, to match the document.
+    theme(panel.grid.minor = element_blank(),
+          text        = element_text(colour = "black"),
+          axis.text   = element_text(colour = "black"),
+          axis.title  = element_text(colour = "black"),
+          strip.text  = element_text(colour = "black"),
+          legend.text = element_text(colour = "black"),
+          strip.background = element_rect(fill = "white", colour = "black"))
+}
+```
+
+For 2026 vehicle and trailer bias terms in the creel model, we propose placing a lognormal prior on b, using the mean and variance of the b parameters for vehicle and trailer counts from that fishery’s own prior years (@tbl-b, @fig-b). Adjusting code and model structure may be needed to accommodate this modification. This action requires an additional assumption that the index to census relationship is stable enough between the prior years and 2026 for a past b to be representative, and that a b parameter based on historical data sufficiently captures the parameter’s inter annual variability. If any census data is collected this season, the prior and the census data would combine, and the b parameter will update whenever there is adequate data. This work would occur in collaboration with Tulalip Tribal technical staff, with all code and supporting documentation made available for all participants. Regarding budget impacts to staffing, in 2026 fisheries we plan to sample at minimum three days per week (two weekdays, one weekend day) in open sections of river.

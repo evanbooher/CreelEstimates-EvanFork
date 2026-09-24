@@ -1,9 +1,12 @@
 # ==============================================================================
 # make_reference_docx.R
 #
-# Builds the Word reference document that memo_prior_census_bias_term.qmd
-# renders against: Calibri throughout, black text, one body size, headings
-# distinguished by weight rather than colour or size jumps.
+# Builds the Word reference document that the census-bias memos
+# (memo_prior_census_bias_term_stillaguamish.qmd,
+# memo_prior_census_bias_term_snohomish.qmd) render against: Calibri
+# throughout, black text, one body size, headings distinguished by weight
+# rather than colour or size jumps. Both memos point reference-doc at the
+# same file, so restyling once restyles both.
 #
 # Run this ONCE and commit the result. Quarto's stock reference doc puts
 # headings in blue Calibri Light at four different sizes, which is why the
