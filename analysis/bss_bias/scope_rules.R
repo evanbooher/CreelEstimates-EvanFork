@@ -181,6 +181,29 @@ WINDOW_RESTRICTIONS <- list(
        scope_tag = c("MS", "NF"),
        est_date_start = "2025-09-16",
        est_date_end   = "2025-10-31",
+       trim_to_last_sampled = TRUE),
+
+  # THE SNOHOMISH FORK COMPARISON WINDOW -- Sep 18 to Oct 31, 2023 and 2024.
+  #
+  # Not the two seasons' own overlap (2023-09-01 to 2023-11-30, 2024-09-21 to
+  # 2024-11-30 -- an overlap of 2024-09-21 to 2023-11-30). Both years' actual
+  # survey activity has a real gap in late October before picking back up in
+  # November (confirmed from the survey-coverage chart, not assumed from the
+  # lookup's season dates), so the wider overlap would include weeks of dead
+  # air in the middle of the window rather than more comparable data. Sep 18
+  # to Oct 31 is the largest span of CONTINUOUS paired survey activity common
+  # to both years -- chosen the same way as Stillaguamish's own Sep 16-Oct 31
+  # window above, and landing on nearly the same calendar dates is
+  # coincidence confirmed independently, not copied from it.
+  list(pattern = regex("^Snohomish fall salmon 2023$"),
+       scope_tag = c("SN_MAIN", "SN_SKY"),
+       est_date_start = "2023-09-18",
+       est_date_end   = "2023-10-31",
+       trim_to_last_sampled = TRUE),
+  list(pattern = regex("^Snohomish fall salmon 2024$"),
+       scope_tag = c("SN_MAIN", "SN_SKY"),
+       est_date_start = "2024-09-18",
+       est_date_end   = "2024-10-31",
        trim_to_last_sampled = TRUE)
 )
 
@@ -288,7 +311,48 @@ SCOPE_PRESETS <- list(
             catch_group = list(species    = "Coastal Cutthroat",
                                life_stage = "NA",
                                fin_mark   = "NA|UM|UNK",
-                               fate       = "Released"))
+                               fate       = "Released")),
+
+  # Snohomish fork comparison, 2023 vs 2024 -- same shape as MS/NF above.
+  # `keep` is the plain water_body_code from the location lookup for this
+  # basin ("Snohomish", "Skykomish"), not a compound "<basin> - <tag>" label
+  # like Stillaguamish's -- the lookup already separates them by real river
+  # name, so no manual tagging was needed to tell them apart.
+  #
+  # SN_MAIN pools sections 1 and 2 (both water_body "Snohomish") under one
+  # scope automatically, via sections_in_water_bodies() matching on water
+  # body rather than section number -- no SECTION_RESTRICTIONS entry needed.
+  # This is also why 2021, whose whole basin-mainstem reach was surveyed as a
+  # single section 1 instead of two, is not in this preset's pattern: the
+  # water-body mechanism only pools sections WITHIN a fishery-year, it does
+  # not reconcile one year's section layout against another's. 2021 is a
+  # separate, informal check (see the memo), not fed through this preset.
+  #
+  # SN_SKY resolves to section 3 in both years (water_body "Skykomish"),
+  # identical census-block boundaries in 2023 and 2024 per the location
+  # lookup -- unlike SN_MAIN, no pooling is needed, just the water-body
+  # filter.
+  #
+  # catch_group values copied literally from catch_groups.R's coho_harvest /
+  # chinook_all (comment there: "in Snohomish and Stillaguamish alike") --
+  # not referenced, because catch_groups.R is never sourced alongside this
+  # file (checked 01_fit_bss_bias.R's source order) and Stillaguamish's own
+  # MS/NF entries already establish inlining, not cross-referencing, as this
+  # list's convention.
+  SN_MAIN = list(tag = "SN_MAIN",
+                 pattern = regex("Snohomish fall salmon 202[34]"),
+                 keep    = "Snohomish",
+                 catch_group = list(species    = "Coho",
+                                    life_stage = "Adult|Jack",
+                                    fin_mark   = "UM|AD",
+                                    fate       = "Kept")),
+  SN_SKY = list(tag = "SN_SKY",
+                pattern = regex("Snohomish fall salmon 202[34]"),
+                keep    = "Skykomish",
+                catch_group = list(species    = "Chinook",
+                                   life_stage = "Adult|Jack",
+                                   fin_mark   = "UM|AD|UNK|NA",
+                                   fate       = "Released|Kept"))
 )
 
 # Does a rule apply to this fishery-year, under the scope currently in force?
