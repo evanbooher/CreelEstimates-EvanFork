@@ -15,22 +15,34 @@
 # inputs and all, in analysis/bss_bias/outputs/bss_b_prior_ledger.csv. A
 # scoped file cites the ledger's prior_id beside each value it uses.
 #
-# fw_creel_bprior_2026_stillaguamish.Rmd -- 2026 Stillaguamish, North Fork,
-# no census counts this season.
+# fw_creel_bprior_2026_snohomish.Rmd -- 2026 Snohomish, mainstem, no census
+# counts this season.
 #
-# Univariate model (G = 1): every 2026 interview so far is a bank angler, so
-# the two-channel model's boat terms have nothing to fit and preflight must
-# accept G = 1. The trailer index channel is kept, tied to the bank gear type.
+# Two-channel model (G = 2): the mainstem is a bank and boat fishery -- 657
+# and 175 boat anglers in the 2023 and 2024 census within the comparison
+# window. If a 2026 render ever sees only bank anglers interviewed, preflight
+# stops it here rather than letting the boat terms run on priors alone.
+#
+# Dates are blank on purpose: resolve_dates() then takes the season from the
+# database's fishery lookup and, in-season, caps the end at yesterday.
+#
+# The b priors are MAINSTEM priors (SN_MAIN, sections 1-2 in 2023 and 2024).
+# b is a single pooled scalar, so if the 2026 fishery opens Skykomish or
+# Snoqualmie water, either restrict this render with section_filter or
+# derive a prior that covers that water -- SN_SKY in scope_rules.R is the
+# starting point for the Skykomish.
 title: "Freshwater Creel Report <br>`r params$fishery_name`"
 date: "`r Sys.Date()`"
 params:
   project_name: "District 13"
-  fishery_name: "Stillaguamish salmon and gamefish 2026"
-  est_date_start: "2026-08-29"
-  est_date_end: "2026-09-17"
+  fishery_name: "Snohomish fall salmon 2026"
+  est_date_start: ""
+  est_date_end: ""
+  # Coho harvest and Chinook encounters -- the same definitions as
+  # catch_groups.R's coho_harvest and chinook_all.
   est_catch_groups: !r data.frame(rbind(
-    c(species = 'Chinook', life_stage = 'Jack', fin_mark = 'UNK', fate = 'Released'),
-    c(species = 'Coastal Cutthroat', life_stage = 'NA', fin_mark = 'NA|UM|UNK', fate = 'Released')))
+    c(species = 'Coho', life_stage = 'Adult|Jack', fin_mark = 'UM|AD', fate = 'Kept'),
+    c(species = 'Chinook', life_stage = 'Adult|Jack', fin_mark = 'UM|AD|UNK|NA', fate = 'Released|Kept')))
   study_design: "Standard"   
   boat_type_collapse: "Yes"
   fish_location_determines_type: "No"
@@ -41,8 +53,8 @@ params:
   days_wkend: !r c('Saturday', 'Sunday')
   day_length_expansion: "night closure"
   min_fishing_time: 0.5
-  bss_model_file_name: "BSS_creel_model_02_2026-09-22_univariate_bprior.stan"
-  allow_single_gear: TRUE  # univariate model only -- see the note above
+  bss_model_file_name: "BSS_creel_model_02_2026-09-22_bprior.stan"
+  allow_single_gear: FALSE
   model_used: "Both models"
   data_grade: "provisional"
   export: "local"
@@ -52,21 +64,21 @@ params:
   save_draws: FALSE  # TRUE keeps posterior draws in estimates_bss.rds (needed by any downstream analysis that reads C_sum/E_sum/b)
   section_filter: !r numeric(0)  # e.g. c(1,2,3) to estimate only those sections; empty keeps every section the fetch returns
   trim_to_last_sampled: FALSE  # TRUE pulls est_date_end back to the last date actually sampled within the window
-  # b's prior, per channel. Derivations: bss_b_prior_ledger.csv.
+  # b's prior, per channel. Derivations: bss_b_prior_ledger.csv. Both pairs
+  # are the formula's output with no widening (sigma_widen = 1), pending
+  # co-manager review. Centre and tau both from the mainstem's own fits,
+  # 2023 and 2024, Sep 18 - Oct 31 (13_snohomish_scope_compare.R).
   #
-  # vehicle -- prior_id stilly_nf_2026_vehicle: lognormal(0.20, 0.43),
-  #   median 1.22, 95% 0.53-2.84. Centre and within-year SEs from the NF
-  #   fork-scoped fits, 2024-25 and 2025-26 (b 1.40, 1.10); between-year tau
-  #   (0.29) borrowed from the mainstem, since the NF's own tau^2 is zero --
-  #   its within-year SEs swamp the year-to-year difference. Set before
-  #   14_derive_b_prior.R existed; today's refits derive 0.22 / 0.44.
-  # trailer -- prior_id stilly_nf_2026_trailer: model default lognormal(0, 1).
-  #   The history-derived prior (sigma 1.09) is wider in the upper tail than
-  #   the default, so two years of data are no better than none here.
-  value_lognormal_mu_b_vehicle: 0.20
-  value_lognormal_mu_b_trailer: 0
-  value_lognormal_sigma_b_vehicle: 0.43
-  value_lognormal_sigma_b_trailer: 1
+  # vehicle -- prior_id sno_main_2026_vehicle: lognormal(0.38, 0.10),
+  #   median 1.47, 95% 1.22-1.78. From b = 1.37, 1.57.
+  #   NARROWER than 2024's own 95% interval (1.35-1.84) -- two close years
+  #   give a small tau. The ledger flags this (contains_center_intervals).
+  # trailer -- prior_id sno_main_2026_trailer: lognormal(0.01, 0.19),
+  #   median 1.01, 95% 0.69-1.48. From b = 0.89, 1.14.
+  value_lognormal_mu_b_vehicle: 0.38
+  value_lognormal_mu_b_trailer: 0.01
+  value_lognormal_sigma_b_vehicle: 0.10
+  value_lognormal_sigma_b_trailer: 0.19
   # Sampler tuning. Defaults match what run_fit() had hardcoded before this
   # param existed (1000/500/0.7/12) -- inherited from fw_creel.Rmd's own
   # default, not tuned for this model or this fishery-year's sparse data.

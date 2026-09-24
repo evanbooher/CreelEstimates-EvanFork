@@ -295,7 +295,7 @@ preflight_bss_inputs <- function(inputs_bss, fishery_name, allow_single_gear = F
   # is a hard structural failure there -- same check 01_fit_bss_bias.R makes
   # at its own bss_preflight stage. NOT a fixed rule, though: the 2026-09-22
   # bank-only fork (BSS_creel_model_02_2026-09-22_univariate_bprior.stan, run through
-  # fw_creel_bprior_2026.Rmd) was built specifically to take G=1 -- b there is
+  # fw_creel_bprior_2026_stillaguamish.Rmd) was built specifically to take G=1 -- b there is
   # fixed-size-2 and explicitly priored regardless of G, and p_TI is built to
   # match G exactly (see the p_TI check below and prep_inputs_bss_bprior.R).
   # allow_single_gear lets that Rmd's call site say so; every other caller
