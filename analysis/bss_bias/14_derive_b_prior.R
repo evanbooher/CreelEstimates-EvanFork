@@ -99,6 +99,35 @@ PRIORS <- list(
          "lognormal(0, 1), so history is no better than uninformative for this",
          "channel. Census boat anglers were under 20 in every fit behind it.")),
 
+  # Mainstem pair, added 2026-10-06 when the 2026 Stillaguamish estimates moved
+  # from North Fork water to the mainstem. b is one scalar for the whole fit,
+  # so its prior should come from the reach being fit.
+  list(prior_id    = "stilly_ms_2026_vehicle",
+       target      = "Stillaguamish salmon and gamefish 2026, mainstem",
+       bias_type   = "vehicle",
+       center_fits = STILLY_MS,
+       tau_fits    = STILLY_MS,
+       sigma_widen = 1,
+       applied_mu  = NULL, applied_sigma = NULL,
+       decision    = paste(
+         "Derived as-is from the mainstem's own fork-scoped fits, 2024-25 and",
+         "2025-26 (b 1.76, 1.14); no borrowing needed, since the mainstem's own",
+         "tau^2 is well above zero. The prior's 95% range contains both years'",
+         "own intervals.")),
+
+  list(prior_id    = "stilly_ms_2026_trailer",
+       target      = "Stillaguamish salmon and gamefish 2026, mainstem",
+       bias_type   = "trailer",
+       center_fits = STILLY_MS,
+       tau_fits    = STILLY_MS,
+       sigma_widen = 1,
+       applied_mu  = 0, applied_sigma = 1,
+       decision    = paste(
+         "Model default kept, same reasoning as the North Fork trailer: the",
+         "mainstem trailer went 3.03 -> 0.86 between years, and the derived",
+         "prior (sigma 1.00, 95% 0.23-11.4) is no narrower than lognormal(0, 1).",
+         "Census boat anglers were under 20 in both fits.")),
+
   list(prior_id    = "sno_main_2026_vehicle",
        target      = "Snohomish fall salmon 2026, mainstem",
        bias_type   = "vehicle",
